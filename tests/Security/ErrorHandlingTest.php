@@ -54,17 +54,62 @@ final class ErrorHandlingTest extends IndexerTestCase
     }
 
     /**
-     * Whatever is shown, the exception should always reach the server log.
+     * A missing path is a failure of the request, not of the server. The page
+     * links a favicon, so a deployment without one asks for a path that is not
+     * there on every single view.
      */
-    public function testExceptionIsLogged(): void
+    public function testMissingPathAnswersWithNotFound(): void
     {
-        $fixture = new Fixture('error-log');
+        if (Indexer::cgiBinary() === null) {
+            $this->markTestSkipped('php-cgi is not available');
+        }
 
-        $response = Indexer::render($fixture, '/does-not-exist/', [
-            /* error_log() with no destination writes to stderr under the CLI */
-        ]);
+        $fixture = new Fixture('error-status');
+
+        $response = Indexer::renderCgi($fixture, '/favicon.ico');
+
+        $this->assertSame('404 Not Found', $response->header('Status'));
+    }
+
+    /**
+     * Following from that, a missing path must not write to the log, or every
+     * request for anything absent would add a line to it.
+     */
+    public function testMissingPathIsNotLogged(): void
+    {
+        $fixture = new Fixture('error-nolog');
+
+        $response = Indexer::render($fixture, '/favicon.ico');
+
+        $this->assertStringNotContainsString('IVFi:', $response->stderr);
+    }
+
+    /**
+     * A containment failure is worth knowing about, either as a
+     * misconfiguration or as somebody probing, so that one is still recorded.
+     */
+    public function testContainmentFailureIsLoggedAndForbidden(): void
+    {
+        $fixture = new Fixture('error-containment');
+        $fixture->file('public.txt');
+
+        $response = Indexer::render($fixture, '/../');
 
         $this->assertStringContainsString('IVFi:', $response->stderr);
-        $this->assertStringContainsString('path does not exist', $response->stderr);
+        $this->assertStringContainsString('below the public working directory', $response->stderr);
+    }
+
+    public function testContainmentFailureAnswersWithForbidden(): void
+    {
+        if (Indexer::cgiBinary() === null) {
+            $this->markTestSkipped('php-cgi is not available');
+        }
+
+        $fixture = new Fixture('error-containment-status');
+        $fixture->file('public.txt');
+
+        $response = Indexer::renderCgi($fixture, '/../');
+
+        $this->assertSame('403 Forbidden', $response->header('Status'));
     }
 }

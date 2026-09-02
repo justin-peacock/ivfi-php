@@ -83,3 +83,27 @@ needs a CGI binary because the CLI does not emit response headers. They skip if
 `php-cgi` is missing; set `IVFI_REQUIRE_CGI=1` to turn that skip into a failure,
 as CI does.
 
+
+## Staged TypeScript work
+
+`strict` is not on yet. The flags were measured individually against the current
+source so the remaining work is a known quantity rather than a guess:
+
+| Flag | Errors |
+|------|--------|
+| `strictBindCallApply` | 0, enabled |
+| `noImplicitReturns` | 2 |
+| `strictFunctionTypes` | 10 |
+| `noImplicitThis` | 104 |
+| `noImplicitAny` | 233 |
+| `strictNullChecks` | not measurable yet |
+
+`strictNullChecks`, and therefore `strict` as a whole, cannot be assessed on
+TypeScript 4.8: the compiler crashes with an internal error rather than
+reporting diagnostics. **TypeScript has to be upgraded before strict mode can
+even be scoped**, so that is the first step, not the last.
+
+A sensible order after that is `noImplicitReturns`, `strictFunctionTypes`,
+`noImplicitThis`, `noImplicitAny`, then `strictNullChecks`, one flag per change
+so each one is reviewable.
+

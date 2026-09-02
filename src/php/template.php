@@ -2236,17 +2236,38 @@ try
       ]
   );
 } catch (Exception $e) {
-  http_response_code(500);
-
   /** Get error code */
   $eCode = $e->getCode();
 
   /**
-   * Always record the full exception server-side, and never send it to the
-   * client outside of debug mode. Its string form carries the stack trace,
-   * which exposes absolute filesystem paths and the internal call structure
+   * These are all failures of the request, not of the server.
+   *
+   * A missing path in particular is routine: the page links a favicon, and any
+   * deployment without one asks for a path that does not exist on every single
+   * view. Answering that with a 500 misreports it to clients and to monitoring
    */
-  error_log(sprintf('IVFi: %s', $e));
+  if($eCode === 4)
+  {
+    http_response_code(404);
+  } else if($eCode === 1 || $eCode === 2 || $eCode === 3)
+  {
+    http_response_code(403);
+  } else {
+    http_response_code(500);
+  }
+
+  /**
+   * Record the exception server-side, but not for a merely missing path, which
+   * would write a log line for every request for anything that isn't there.
+   *
+   * It is never sent to the client outside of debug mode: the string form
+   * carries the stack trace, which exposes absolute filesystem paths and the
+   * internal call structure
+   */
+  if($eCode !== 4)
+  {
+    error_log(sprintf('IVFi: %s', $e));
+  }
 
   echo Helpers::createElement('h3', [], 'Error:');
 

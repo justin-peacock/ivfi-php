@@ -1,0 +1,34 @@
+version: 2
+
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      # Patch and minor bumps land together, so the noise stays low and the
+      # build matrix does the checking
+      routine:
+        update-types:
+          - minor
+          - patch
+      # The webpack loaders move together, and splitting them across pull
+      # requests tends to produce combinations that do not build
+      webpack:
+        patterns:
+          - webpack
+          - webpack-cli
+          - '*-loader'
+          - '*-webpack-plugin'
+
+  - package-ecosystem: composer
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
