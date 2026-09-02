@@ -37,6 +37,26 @@ abstract class IndexerTestCase extends TestCase
     }
 
     /**
+     * The subset of the above that is safe to snapshot.
+     *
+     * Filenames are bytes, and the same name is not the same bytes everywhere:
+     * macOS stores them decomposed while Linux keeps whatever it was given, so
+     * `café` differs between the two both in the rendered output and in where
+     * it sorts. Golden files therefore stay ASCII, and the non-ASCII cases are
+     * covered by the assertion based tests, which care about the encoding
+     * rather than the exact bytes.
+     *
+     * @return array<string, string>
+     */
+    protected function asciiHostileNames(): array
+    {
+        return array_filter(
+            $this->hostileNames(),
+            static fn (string $name): bool => preg_match('/^[\x20-\x7E]*$/', $name) === 1
+        );
+    }
+
+    /**
      * Asserts that nothing in the document became markup that the script did
      * not intend to emit.
      *
