@@ -19,4 +19,5 @@ if (!file_exists($build)) {
 
 require __DIR__ . '/Support/Fixture.php';
 require __DIR__ . '/Support/Indexer.php';
+require __DIR__ . '/Support/Server.php';
 require __DIR__ . '/Support/IndexerTestCase.php';

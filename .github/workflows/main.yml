@@ -68,15 +68,6 @@ jobs:
         coverage: none
         tools: composer
 
-    # The authentication tests drive a real digest exchange, which needs the
-    # response headers that only a CGI SAPI emits
-    - name: Install php-cgi
-      run: |
-        # setup-php adds the ondrej PPA, but the package lists are still the
-        # image's, so the newest versions are not yet visible to apt
-        sudo apt-get update
-        sudo apt-get install -y --no-install-recommends php${{ matrix.php }}-cgi
-
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
@@ -94,6 +85,3 @@ jobs:
 
     - name: Run the PHP test suite
       run: vendor/bin/phpunit
-      env:
-        # Turn a missing php-cgi into a failure rather than a silent skip
-        IVFI_REQUIRE_CGI: '1'

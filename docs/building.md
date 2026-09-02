@@ -78,10 +78,10 @@ diff before committing it:
 UPDATE_GOLDEN=1 vendor/bin/phpunit
 ```
 
-The authentication tests drive a genuine digest challenge and response, which
-needs a CGI binary because the CLI does not emit response headers. They skip if
-`php-cgi` is missing; set `IVFI_REQUIRE_CGI=1` to turn that skip into a failure,
-as CI does.
+The authentication tests drive a genuine digest challenge and response against
+PHP's built-in web server, so they read the nonce the server actually issued
+rather than reconstructing it. That also covers the response status codes, which
+the CLI does not emit. No extra binaries are needed.
 
 
 ## Staged TypeScript work

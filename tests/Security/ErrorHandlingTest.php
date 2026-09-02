@@ -7,6 +7,7 @@ namespace Ivfi\Tests\Security;
 use Ivfi\Tests\Support\Fixture;
 use Ivfi\Tests\Support\Indexer;
 use Ivfi\Tests\Support\IndexerTestCase;
+use Ivfi\Tests\Support\Server;
 
 /**
  * The top level handler echoed the exception, which stringifies to include the
@@ -60,15 +61,16 @@ final class ErrorHandlingTest extends IndexerTestCase
      */
     public function testMissingPathAnswersWithNotFound(): void
     {
-        if (Indexer::cgiBinary() === null) {
-            $this->markTestSkipped('php-cgi is not available');
-        }
-
         $fixture = new Fixture('error-status');
+        $server  = new Server($fixture);
 
-        $response = Indexer::renderCgi($fixture, '/favicon.ico');
+        try {
+            $response = $server->request('/favicon.ico');
 
-        $this->assertSame('404 Not Found', $response->header('Status'));
+            $this->assertSame('404 Not Found', $response->header('Status'));
+        } finally {
+            $server->stop();
+        }
     }
 
     /**
@@ -101,15 +103,16 @@ final class ErrorHandlingTest extends IndexerTestCase
 
     public function testContainmentFailureAnswersWithForbidden(): void
     {
-        if (Indexer::cgiBinary() === null) {
-            $this->markTestSkipped('php-cgi is not available');
-        }
-
         $fixture = new Fixture('error-containment-status');
         $fixture->file('public.txt');
+        $server = new Server($fixture);
 
-        $response = Indexer::renderCgi($fixture, '/../');
+        try {
+            $response = $server->request('/../');
 
-        $this->assertSame('403 Forbidden', $response->header('Status'));
+            $this->assertSame('403 Forbidden', $response->header('Status'));
+        } finally {
+            $server->stop();
+        }
     }
 }

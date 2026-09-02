@@ -5,17 +5,18 @@ declare(strict_types=1);
 namespace Ivfi\Tests\Security;
 
 use Ivfi\Tests\Support\Fixture;
-use Ivfi\Tests\Support\Indexer;
 use Ivfi\Tests\Support\IndexerTestCase;
+use Ivfi\Tests\Support\Response;
+use Ivfi\Tests\Support\Server;
 
 /**
  * Digest authentication compared the response with a loose, non constant time
  * `!=`, and issued nonces from `uniqid()` that were never checked when the
  * client sent them back.
  *
- * These run through CGI so the real challenge can be read from the response
- * headers, which means the exchange uses the server's own nonce rather than
- * one the test reconstructed.
+ * These run through PHP's built-in server so the real challenge can be read
+ * from the response headers, which means the exchange uses the server's own
+ * nonce rather than one the test reconstructed.
  */
 final class AuthenticationTest extends IndexerTestCase
 {
@@ -23,23 +24,24 @@ final class AuthenticationTest extends IndexerTestCase
     private const PASS  = 's3cret';
     private const REALM = 'Restricted content.';
 
-    protected function setUp(): void
+    /** @var list<Server> */
+    private array $servers = [];
+
+    protected function tearDown(): void
     {
-        if (Indexer::cgiBinary() !== null) {
-            return;
+        foreach ($this->servers as $server) {
+            $server->stop();
         }
 
-        /**
-         * Skipping locally is a convenience, but a skip in CI would quietly
-         * drop the authentication coverage, so make it an error there.
-         */
-        if (getenv('IVFI_REQUIRE_CGI') === '1') {
-            $this->fail(
-                'php-cgi is required when IVFI_REQUIRE_CGI=1 but was not found'
-            );
-        }
+        $this->servers = [];
+    }
 
-        $this->markTestSkipped('php-cgi is not available');
+    private function serve(Fixture $fixture): Server
+    {
+        $server = new Server($fixture);
+        $this->servers[] = $server;
+
+        return $server;
     }
 
     private function fixture(?string $credential = null): Fixture
@@ -58,9 +60,9 @@ final class AuthenticationTest extends IndexerTestCase
     /**
      * Reads the nonce out of a fresh challenge.
      */
-    private function challenge(Fixture $fixture): string
+    private function challenge(Server $server): string
     {
-        $response = Indexer::renderCgi($fixture);
+        $response = $server->request('/');
 
         $header = (string) $response->header('WWW-Authenticate');
 
@@ -75,12 +77,12 @@ final class AuthenticationTest extends IndexerTestCase
     }
 
     private function authorize(
-        Fixture $fixture,
+        Server $server,
         string $nonce,
         string $password,
         string $user = self::USER,
         string $uri = '/'
-    ): \Ivfi\Tests\Support\Response {
+    ): Response {
         $cnonce = 'testcnonce';
         $nc     = '00000001';
 
@@ -89,9 +91,9 @@ final class AuthenticationTest extends IndexerTestCase
 
         $response = md5("{$a1}:{$nonce}:{$nc}:{$cnonce}:auth:{$a2}");
 
-        return Indexer::renderCgi($fixture, $uri, [
-            'PHP_AUTH_DIGEST' => sprintf(
-                'username="%s", realm="%s", nonce="%s", uri="%s", qop=auth, nc=%s, cnonce="%s", response="%s"',
+        return $server->request($uri, [
+            'Authorization' => sprintf(
+                'Digest username="%s", realm="%s", nonce="%s", uri="%s", qop=auth, nc=%s, cnonce="%s", response="%s"',
                 $user,
                 self::REALM,
                 $nonce,
@@ -105,16 +107,16 @@ final class AuthenticationTest extends IndexerTestCase
 
     public function testUnauthenticatedRequestIsChallenged(): void
     {
-        $fixture = $this->fixture();
+        $server = $this->serve($this->fixture());
 
-        $this->challenge($fixture);
+        $this->challenge($server);
     }
 
     public function testCorrectPasswordIsAccepted(): void
     {
-        $fixture = $this->fixture();
+        $server = $this->serve($this->fixture());
 
-        $result = $this->authorize($fixture, $this->challenge($fixture), self::PASS);
+        $result = $this->authorize($server, $this->challenge($server), self::PASS);
 
         $this->assertStringContainsString('secret.jpg', $result->body);
         $this->assertStringNotContainsString('Invalid credentials', $result->body);
@@ -122,9 +124,9 @@ final class AuthenticationTest extends IndexerTestCase
 
     public function testWrongPasswordIsRejected(): void
     {
-        $fixture = $this->fixture();
+        $server = $this->serve($this->fixture());
 
-        $result = $this->authorize($fixture, $this->challenge($fixture), 'wrong');
+        $result = $this->authorize($server, $this->challenge($server), 'wrong');
 
         $this->assertStringContainsString('Invalid credentials', $result->body);
         $this->assertStringNotContainsString('secret.jpg', $result->body);
@@ -132,10 +134,10 @@ final class AuthenticationTest extends IndexerTestCase
 
     public function testUnknownUserIsRejected(): void
     {
-        $fixture = $this->fixture();
+        $server = $this->serve($this->fixture());
 
         $result = $this->authorize(
-            $fixture, $this->challenge($fixture), self::PASS, 'mallory'
+            $server, $this->challenge($server), self::PASS, 'mallory'
         );
 
         $this->assertStringContainsString('Invalid credentials', $result->body);
@@ -149,9 +151,9 @@ final class AuthenticationTest extends IndexerTestCase
     {
         $ha1 = md5(self::USER . ':' . self::REALM . ':' . self::PASS);
 
-        $fixture = $this->fixture('md5:' . $ha1);
+        $server = $this->serve($this->fixture('md5:' . $ha1));
 
-        $result = $this->authorize($fixture, $this->challenge($fixture), self::PASS);
+        $result = $this->authorize($server, $this->challenge($server), self::PASS);
 
         $this->assertStringContainsString('secret.jpg', $result->body);
     }
@@ -160,9 +162,9 @@ final class AuthenticationTest extends IndexerTestCase
     {
         $ha1 = md5(self::USER . ':' . self::REALM . ':' . self::PASS);
 
-        $fixture = $this->fixture('md5:' . $ha1);
+        $server = $this->serve($this->fixture('md5:' . $ha1));
 
-        $result = $this->authorize($fixture, $this->challenge($fixture), 'wrong');
+        $result = $this->authorize($server, $this->challenge($server), 'wrong');
 
         $this->assertStringContainsString('Invalid credentials', $result->body);
     }
@@ -173,9 +175,9 @@ final class AuthenticationTest extends IndexerTestCase
      */
     public function testInventedNonceIsRejected(): void
     {
-        $fixture = $this->fixture();
+        $server = $this->serve($this->fixture());
 
-        $result = $this->authorize($fixture, uniqid(), self::PASS);
+        $result = $this->authorize($server, uniqid(), self::PASS);
 
         $this->assertStringContainsString('Invalid credentials', $result->body);
         $this->assertStringNotContainsString('secret.jpg', $result->body);
@@ -183,11 +185,11 @@ final class AuthenticationTest extends IndexerTestCase
 
     public function testForgedNonceWithPlausibleShapeIsRejected(): void
     {
-        $fixture = $this->fixture();
+        $server = $this->serve($this->fixture());
 
         $forged = time() . ':' . bin2hex(random_bytes(8)) . ':' . str_repeat('a', 64);
 
-        $result = $this->authorize($fixture, $forged, self::PASS);
+        $result = $this->authorize($server, $forged, self::PASS);
 
         $this->assertStringContainsString('Invalid credentials', $result->body);
     }
@@ -198,11 +200,11 @@ final class AuthenticationTest extends IndexerTestCase
      */
     public function testEachChallengeIssuesADistinctNonce(): void
     {
-        $fixture = $this->fixture();
+        $server = $this->serve($this->fixture());
 
         $this->assertNotSame(
-            $this->challenge($fixture),
-            $this->challenge($fixture),
+            $this->challenge($server),
+            $this->challenge($server),
             'the same nonce was issued twice'
         );
     }
@@ -213,9 +215,9 @@ final class AuthenticationTest extends IndexerTestCase
      */
     public function testChallengeSendsAWellFormedStatus(): void
     {
-        $fixture = $this->fixture();
+        $server = $this->serve($this->fixture());
 
-        $response = Indexer::renderCgi($fixture);
+        $response = $server->request('/');
 
         $this->assertSame('401 Unauthorized', $response->header('Status'));
     }
