@@ -1,11 +1,26 @@
 {
     "compileOnSave": true,
     "compilerOptions": {
+        "target": "ES2020",
+        "module": "ESNext",
+        "moduleResolution": "node",
+        "lib": ["ES2020", "DOM", "DOM.Iterable"],
+        // Browser code, so only the ambient types it actually uses. Without
+        // this every installed @types/* is pulled in, including @types/node,
+        // whose newer releases use syntax this TypeScript cannot parse.
+        "types": ["modernizr"],
+        // Enabled because it already passes. The rest of the strict family is
+        // staged work, see docs/building.md: noImplicitAny is 233 errors and
+        // noImplicitThis 104, and strictNullChecks cannot even be measured
+        // until TypeScript is upgraded, because 4.8 crashes on it here.
+        "strictBindCallApply": true,
         "sourceMap": true,
         "allowSyntheticDefaultImports": true,
         "esModuleInterop": true,
-        "resolveJsonModule": true
+        "resolveJsonModule": true,
+        "forceConsistentCasingInFileNames": true
     },
+    "include": ["src/core/**/*"],
     "ts-node": {
         "esm": true
     }

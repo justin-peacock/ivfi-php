@@ -1,5 +1,5 @@
 /** Package information */
-import pck from './package.json' assert {
+import pck from './package.json' with {
 	type: 'json'
 };
 

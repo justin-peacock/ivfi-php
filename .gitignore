@@ -4,3 +4,6 @@ docker/public
 *.7z
 *.zip
 *.ignore
+vendor/
+.phpunit.cache/
+.phpunit.result.cache

@@ -2,32 +2,35 @@ name: Build
 
 on:
   push:
-    branches: [ master ]
+    # master is kept so the workflow still fires if these changes are
+    # offered upstream, where that is the default branch
+    branches: [ main, master ]
   pull_request:
-    branches: [ master ]
+    branches: [ main, master ]
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [ '20', '22', '24' ]
+
+    name: Build (Node ${{ matrix.node }})
+
     steps:
     - uses: actions/checkout@v4
-    - name: Setup Node.js
+
+    - name: Setup Node.js ${{ matrix.node }}
       uses: actions/setup-node@v4
       with:
-        node-version: '20'
-
-    - name: Cache modules
-      uses: actions/cache@v4
-      with:
-        path: ~/.npm
-        key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
-        restore-keys: |
-          ${{ runner.os }}-node-
+        node-version: ${{ matrix.node }}
+        cache: npm
 
     - name: Install dependencies
-      run: npm install
+      run: npm ci
 
     - name: Run tests
       run: npm test
@@ -39,7 +42,48 @@ jobs:
       run: npm run make-standalone
 
     - name: Archive production artifacts
+      if: matrix.node == '22'
       uses: actions/upload-artifact@v4
       with:
         name: build
         path: build/
+
+  php:
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # PHPUnit 11 needs 8.2 or newer. The script itself still runs on
+        # older PHP; this is the floor for the test tooling, not the product
+        php: [ '8.2', '8.3', '8.4' ]
+
+    name: PHP ${{ matrix.php }}
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup PHP ${{ matrix.php }}
+      uses: shivammathur/setup-php@v2
+      with:
+        php-version: ${{ matrix.php }}
+        coverage: none
+        tools: composer
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+        cache: npm
+
+    # The suite runs against the built indexer.php, not the webpack template
+    - name: Build the indexer
+      run: |
+        npm ci
+        npm run build
+
+    - name: Install PHP dependencies
+      run: composer install --no-interaction --no-progress
+
+    - name: Run the PHP test suite
+      run: vendor/bin/phpunit
