@@ -431,6 +431,22 @@ html > body {
         font-feature-settings: "tnum";
       }
 
+      /* Only present when a session is signed in */
+      > div.sessionInfo {
+        > span {
+          color: #4d525c;
+        }
+
+        > a.signOut {
+          margin-left: 10px;
+
+          &::before {
+            content: "\00b7";
+            margin-right: 10px;
+          }
+        }
+      }
+
       div {
         &:nth-child(1):not(.referenceGit)::after {
           content: "|";

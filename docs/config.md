@@ -49,28 +49,57 @@ return array(
 ## Authentication
 Key: **`authentication`**
 
-Enables HTTP authentication through PHP (Digest access authentication).
-
-Don't rely on this for any strong protection.
+Gates the index behind a sign-in form. Credentials are checked against a
+`password_hash()` value, the session is held in a cookie, and there is a sign-out
+link in the footer.
 
 | Child key | Type | Value | Description |
 |-----|------|---------|-------------|
-| `users` | Array | `username => password` | Each key in the array represents a valid user where the value is the password. A value prefixed with `md5:` is treated as a precomputed HA1 instead, so passwords need not be stored in the clear.
-| `restrict` | String | `regex` | Applies authentication exclusively to paths matching the regular expression.
+| `users` | Array | `username => hash` | Valid users, where each value is a `password_hash()` output. Plaintext is refused. |
+| `restrict` | String | `regex` | Applies authentication only to paths matching the expression. |
+| `behind_proxy` | Bool | `false` | Trust `X-Forwarded-Proto` when deciding whether to mark the cookie `Secure`. Enable this **only** behind a proxy that strips the header from client requests. |
+| `throttle_path` | String | system temp dir | Directory holding the failed-attempt counter. Must be writable by the web server. |
 
-### Avoiding plaintext passwords
-
-Digest authentication needs the server to know `md5(username:realm:password)`, known as the HA1. Store that instead of the password by prefixing it with `md5:`. The realm is always `Restricted content.`:
+### Generating a credential
 
 ```
-php -r 'echo "md5:" . md5("username" . ":Restricted content.:" . "password");'
+php -r 'echo password_hash("your password", PASSWORD_DEFAULT), "\n";'
 ```
+
+Put the result in `users`. The algorithm is whatever your PHP treats as current
+(bcrypt today, argon2 where configured), and the cost is PHP's default.
+
+Plaintext passwords are **rejected**, not quietly accepted: the script logs how to
+generate a hash and refuses every sign-in until one is configured. That is
+deliberate, since the alternative fails silently and leaves the secret readable on
+disk.
+
+### What it does
+
+- Session cookie `IVFISESS`, marked `HttpOnly`, `SameSite=Lax`, and `Secure` when the request arrived over HTTPS.
+- A new session identifier on sign-in, so one fixed beforehand cannot be reused.
+- A token on the form, and on the sign-out link, so neither can be triggered from another site.
+- The same message for an unknown user and a wrong password, so the form cannot be used to enumerate accounts.
+- Five failed attempts from an address lock it out for fifteen minutes, and the correct password is refused during the lockout too.
+- Sessions stop being accepted after twelve hours idle.
 
 ### A note on strength
 
-Digest access authentication is a legacy scheme. It fixes the password to MD5, offers no protection for the response body, and requires the server to hold a password equivalent. Challenges issued by this script are signed and expire after five minutes, which prevents a client from inventing its own, but a captured `Authorization` header can still be replayed inside that window.
+This is a reasonable gate, not a security boundary. It is one password between the
+internet and your files, over whatever transport your server provides.
 
-Serve over HTTPS, and prefer authentication at the web server where the option exists. Don't rely on this for any strong protection.
+**Serve it over HTTPS.** Without it the session cookie is sent in the clear and
+the `Secure` flag cannot be set.
+
+Where you already run an identity provider, prefer it. Authentication at the proxy
+(Cloudflare Access, Authelia, Traefik middleware) keeps unauthenticated requests
+from reaching PHP at all, which is strictly better than anything this script can do
+once the request has arrived.
+
+> **If you serve HTML files from an indexed directory**, remember they run on the
+> same origin as this page. Anything in such a file executes as first-party script
+> and can act with the signed-in session. Host untrusted or third-party HTML on a
+> separate hostname.
 
 Example:
 ```php
@@ -78,7 +107,7 @@ Example:
 return array(
     'authentication' => array(
         'users' => array(
-            'username' => 'password'
+            'username' => '$2y$12$abcdefghijklmnopqrstuv...'
         ),
         'restrict' => '/^\/(protected|secret|directory\/protected)\/?/i'
     )

@@ -5,6 +5,10 @@
          colors="true"
          failOnWarning="true"
          failOnNotice="true"
+         failOnDeprecation="true"
+         displayDetailsOnTestsThatTriggerDeprecations="true"
+         displayDetailsOnPhpunitDeprecations="true"
+         displayDetailsOnTestsThatTriggerWarnings="true"
          cacheDirectory=".phpunit.cache">
     <testsuites>
         <testsuite name="security">
