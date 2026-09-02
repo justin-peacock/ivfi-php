@@ -55,8 +55,22 @@ Don't rely on this for any strong protection.
 
 | Child key | Type | Value | Description |
 |-----|------|---------|-------------|
-| `users` | Array | `username => password` | Each key in the array represents a valid user where the value is the password.
+| `users` | Array | `username => password` | Each key in the array represents a valid user where the value is the password. A value prefixed with `md5:` is treated as a precomputed HA1 instead, so passwords need not be stored in the clear.
 | `restrict` | String | `regex` | Applies authentication exclusively to paths matching the regular expression.
+
+### Avoiding plaintext passwords
+
+Digest authentication needs the server to know `md5(username:realm:password)`, known as the HA1. Store that instead of the password by prefixing it with `md5:`. The realm is always `Restricted content.`:
+
+```
+php -r 'echo "md5:" . md5("username" . ":Restricted content.:" . "password");'
+```
+
+### A note on strength
+
+Digest access authentication is a legacy scheme. It fixes the password to MD5, offers no protection for the response body, and requires the server to hold a password equivalent. Challenges issued by this script are signed and expire after five minutes, which prevents a client from inventing its own, but a captured `Authorization` header can still be replayed inside that window.
+
+Serve over HTTPS, and prefer authentication at the web server where the option exists. Don't rely on this for any strong protection.
 
 Example:
 ```php
@@ -280,7 +294,8 @@ Shows a footer with some general information at the bottom of the page.
 | `performance` | Bool | `false` | Enables [performance mode](performance.md). `true` will enable it for all folders, while setting it to a number, will enable it on directories above or equal to that respective amount of files.
 | `footer` | Bool | `true` | Setting this to `true` or `false` will enable or disable the path, site and generation time in the footer respectively.
 | `credits` | Bool | `true` | When set to true, it will display a simple link to the git repository in the footer along with the version number. I would appreciate it if you keep this enabled, but i also understand that it is not always desirable, so the option to hide it is there.
-| `debug` | Bool | `false` | Enables PHP debugging and `console.log()` info messages.
+| `trust_prepend_header` | Bool | `false` | Whether the `X-Indexer-Prepend-Path` request header is honoured. See [Path Prepending](#path-prepending). Only enable this when a reverse proxy sets the header and strips any copy sent by the client.
+| `debug` | Bool | `false` | Enables PHP debugging and `console.log()` info messages. Keep this disabled in production: it sends exception traces, which contain absolute filesystem paths, to the browser.
 
 # Advanced
 ## Server <!-- {docsify-ignore} -->
@@ -312,7 +327,9 @@ Example usage with Nginx:
 
 This option can be used if you for example are serving the script through a reverse proxy to a path that is not the actual web root.
 
-This can also be set as a header (`X-Indexer-Prepend-Path`) in cases where the script is being processed through a proxy.
+This can also be set as a header (`X-Indexer-Prepend-Path`) in cases where the script is being processed through a proxy. The header is **ignored unless `trust_prepend_header` is enabled** in the configuration.
+
+> **Note:** the header rewrites every link the page emits, so it must only be trusted where a reverse proxy sets it and strips any copy sent by the client. A visitor can send this header directly, so honouring it on a server that is reachable without the proxy hands link control to the visitor. Prefer the `INDEXER_PREPEND_PATH` server variable, which a client cannot reach. Regardless of the source, the value is discarded unless it is path shaped.
 
 #### An example where this can be used:
 

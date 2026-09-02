@@ -136,6 +136,15 @@ $config = [
      * 'strict' uses realpath() to avoid backwards directory traversal
      * whereas 'weak' uses a similar string-based approach */
     'path_checking' => 'strict',
+    /**
+     * Whether the `X-Indexer-Prepend-Path` request header is honoured.
+     *
+     * The header rewrites every link the page emits, so it must only be
+     * trusted where a reverse proxy sets it and strips any copy sent by the
+     * client. Leave this disabled unless that is your setup, and prefer the
+     * `INDEXER_PREPEND_PATH` server variable, which a client cannot reach.
+     */
+    'trust_prepend_header' => false,
     /* Enabled the performance mode */
     'performance' => false,
     /* Whether extra information in the footer should be generated */
@@ -152,9 +161,12 @@ $config = [
     'credits' => true,
     /**
      * Enables console output in JS and PHP debugging.
-     * Also enables random query-strings for js/css files to bust the cache
+     * Also enables random query-strings for js/css files to bust the cache.
+     *
+     * Keep this disabled in production: it exposes exception traces, which
+     * carry absolute filesystem paths, and it defeats caching of the assets
      */
-    'debug' => true
+    'debug' => false
 ];
 
 /* Any potential libraries and so on for extra features will appear here */
@@ -221,37 +233,99 @@ class Helpers
    */ 
   public static function startsWith($haystack, $needle)
   {
-    return $needle === '' || strrpos($haystack, $needle, - strlen($haystack)) !== false;
+    return $needle === '' || strncmp($haystack, $needle, strlen($needle)) === 0;
+  }
+
+  /**
+   * Encodes a value for safe inclusion in HTML text or an attribute value
+   *
+   * This is the single escaping primitive for the script. Every value that
+   * reaches the document should pass through here unless it is known-safe
+   * markup that was itself assembled by `createElement()`.
+   *
+   * @param Mixed  $value  The value to encode
+   *
+   * @return String
+   */
+  public static function escape($value)
+  {
+    return htmlspecialchars(
+      (string) $value, ENT_QUOTES | ENT_SUBSTITUTE | ENT_HTML5, 'UTF-8'
+    );
   }
 
   /**
    * Creates a stringed HTML element
    *
-   * @param String  $tag          Element type
-   * @param Array   $attributes   Element attributes
-   * @param String  $text         Inner text
-   * 
+   * Attribute values are always encoded, and attribute names that could
+   * break out of the tag are dropped. Inner text is encoded by default;
+   * callers that pass markup assembled by `createElement()` must opt out
+   * using $rawText.
+   *
+   * `script` and `style` hold raw character data, so their contents are
+   * never HTML-encoded (that would corrupt the CSS or JS). The closing
+   * sequence is neutralised instead.
+   *
+   * @param String   $tag          Element type
+   * @param Array    $attributes   Element attributes
+   * @param String   $text         Inner text
+   * @param Boolean  $rawText      Whether $text is already-safe markup
+   *
    * @return String
-   */ 
-  public static function createElement($tag, $attributes, $text = NULL)
+   */
+  public static function createElement($tag, $attributes, $text = NULL, $rawText = false)
   {
     /** Avoid using closing tags for these element types */
     $useClosing = !in_array($tag, [
       'link', 'meta'
     ]);
 
+    /** These elements hold raw character data rather than parsed HTML */
+    $isRawTextElement = in_array(strtolower($tag), [
+      'script', 'style'
+    ]);
+
     $HTML = ('<' . $tag);
 
     foreach($attributes as $key => $value)
     {
-      $HTML .= $value == NULL
+      /**
+       * Drop any attribute name that isn't a plain HTML attribute name,
+       * so a crafted key can't inject additional attributes or close the tag
+       */
+      if(!preg_match('/^[A-Za-z_:][A-Za-z0-9_:.\-]*$/', $key))
+      {
+        continue;
+      }
+
+      /**
+       * A NULL or empty value renders as a bare attribute. Note this is a
+       * strict check: a loose one would also swallow the string "0", which
+       * turned valid values such as `data-raw="0"` into bare attributes
+       */
+      $HTML .= ($value === NULL || $value === '')
         ? (' ' . $key)
-        : (' ' . $key . '="' . $value . '"');
+        : (' ' . $key . '="' . self::escape($value) . '"');
+    }
+
+    if($text === NULL || $text === '')
+    {
+      $content = '';
+    } else if($isRawTextElement)
+    {
+      $content = str_ireplace(
+        ['</script', '</style'], ['<\/script', '<\/style'], $text
+      );
+    } else if($rawText)
+    {
+      $content = $text;
+    } else {
+      $content = self::escape($text);
     }
 
     $HTML .= $useClosing
-      ? ('>' . ($text ? $text : '') . '</' . $tag . '>')
-      : ($text ? $text : '') . '>';
+      ? ('>' . $content . '</' . $tag . '>')
+      : ($content . '>');
 
     return $HTML;
   }
@@ -329,16 +403,42 @@ class Helpers
    * @param String   $path          The path to check
    * @param String   $base          The base path
    * @param Boolean  $useRealpath   Whether to use realpath
-   * 
-   * @return String
-   */ 
+   *
+   * @return Boolean
+   */
   public static function isAboveCurrent($path, $base, $useRealpath = true)
   {
-    return self::startsWith($useRealpath
-      ? realpath($path)
-      : self::removeDotSegments($path), $useRealpath
-        ? realpath($base)
-        : self::removeDotSegments($base));
+    if($useRealpath)
+    {
+      $path = realpath($path);
+      $base = realpath($base);
+    } else {
+      $path = self::removeDotSegments($path);
+      $base = self::removeDotSegments($base);
+    }
+
+    /* `realpath()` returns false for anything it cannot resolve */
+    if($path === false || $base === false)
+    {
+      return false;
+    }
+
+    /* The base directory itself is inside the base directory */
+    if($path === $base)
+    {
+      return true;
+    }
+
+    /**
+     * Compare with a trailing separator on both sides so the match lands on a
+     * path boundary. A plain prefix test accepts any sibling whose name merely
+     * begins with the base, so a base of `/srv/pub` would wrongly be treated
+     * as containing `/srv/pub-secret`
+     */
+    return self::startsWith(
+      rtrim($path, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR,
+      rtrim($base, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR
+    );
   }
 
   /**
@@ -475,78 +575,194 @@ class Helpers
   }
 }
 
+/** How long an issued digest challenge stays valid, in seconds */
+define('AUTH_NONCE_LIFETIME', 300);
+
+/**
+ * Parses an HTTP digest header into its components
+ *
+ * @param String  $text   The raw `PHP_AUTH_DIGEST` value
+ *
+ * @return Array|Boolean
+ */
+function httpDigestParse($text)
+{
+  /* Protect against missing data */
+  $neededParts = [
+    'nonce' => 1,
+    'nc' => 1,
+    'cnonce' => 1,
+    'qop' => 1,
+    'username' => 1,
+    'uri' => 1,
+    'response' => 1
+  ];
+
+  $data = [];
+  $keys = implode('|', array_keys($neededParts));
+
+  /**
+   * The quoted branch was `([^\2]+?)`, which reads as a backreference but is
+   * really the octal escape for chr(2), so it behaved as "any character" and
+   * parsed correctly by accident. Spelled as a lazy `.` it says what it means.
+   */
+  preg_match_all(
+    '@(' . $keys . ')=(?:([\'"])(.*?)\2|([^\s,]+))@', $text, $matches, PREG_SET_ORDER
+  );
+
+  foreach($matches as $m)
+  {
+    /**
+     * Checked rather than truthy: a legitimate value of "0" would otherwise
+     * fall through to the unquoted group, which is unset on this branch
+     */
+    $data[$m[1]] = (isset($m[3]) && $m[3] !== '') ? $m[3] : $m[4];
+    unset($neededParts[$m[1]]);
+  }
+
+  return $neededParts ? false : $data;
+}
+
+/**
+ * Derives the key used to sign digest nonces
+ *
+ * The credentials are already the shared secret between the server and the
+ * client, so deriving the signing key from them keeps this configuration free
+ * while giving an attacker nothing they would not already need to know.
+ *
+ * @param Array    $users   An array of users and their password
+ * @param String   $realm   Authentication realm
+ *
+ * @return String
+ */
+function authNonceKey($users, $realm)
+{
+  return hash('sha256', serialize($users) . '|' . $realm);
+}
+
+/**
+ * Creates a signed, timestamped nonce
+ *
+ * @param Array    $users   An array of users and their password
+ * @param String   $realm   Authentication realm
+ *
+ * @return String
+ */
+function authCreateNonce($users, $realm)
+{
+  $payload = time() . ':' . bin2hex(random_bytes(8));
+
+  return $payload . ':' . hash_hmac(
+    'sha256', $payload, authNonceKey($users, $realm)
+  );
+}
+
+/**
+ * Verifies that a nonce was issued by this script and has not expired
+ *
+ * @param String   $nonce   The nonce returned by the client
+ * @param Array    $users   An array of users and their password
+ * @param String   $realm   Authentication realm
+ *
+ * @return Boolean
+ */
+function authVerifyNonce($nonce, $users, $realm)
+{
+  $parts = explode(':', (string) $nonce);
+
+  if(count($parts) !== 3)
+  {
+    return false;
+  }
+
+  $expected = hash_hmac(
+    'sha256', $parts[0] . ':' . $parts[1], authNonceKey($users, $realm)
+  );
+
+  if(!hash_equals($expected, $parts[2]))
+  {
+    return false;
+  }
+
+  /* Reject stale and future dated challenges */
+  $age = (time() - (int) $parts[0]);
+
+  return ($age >= 0 && $age <= AUTH_NONCE_LIFETIME);
+}
+
   /**
    * Authenticaticates a user
    *
-   * @param String   $users   An array of users and their password
+   * @param Array    $users   An array of users and their password
    * @param String   $realm   Authenication realm
-   * 
+   *
    * @return Void
-   */ 
+   */
 function authenticate($users, $realm)
 {
-  function http_digest_parse($text)
-  {
-    /* Protect against missing data */
-    $neededParts = [
-      'nonce' => 1,
-      'nc' => 1,
-      'cnonce' => 1,
-      'qop' => 1,
-      'username' => 1,
-      'uri' => 1,
-      'response' => 1
-    ];
-
-    $data = [];
-    $keys = implode('|', array_keys($neededParts));
-
-    preg_match_all(
-      '@(' . $keys . ')=(?:([\'"])([^\2]+?)\2|([^\s,]+))@', $text, $matches, PREG_SET_ORDER
-    );
-
-    foreach($matches as $m)
-    {
-      $data[$m[1]] = $m[3] ? $m[3] : $m[4];
-      unset($neededParts[$m[1]]);
-    }
-
-    return $neededParts ? false : $data;
-  }
-
   /* Create header for when unathorized */
-  function createHeader($realm)
+  $createHeader = function() use ($users, $realm)
   {
-    header($_SERVER['SERVER_PROTOCOL'] . '401 Unauthorized');
-    header('WWW-Authenticate: Digest realm="' . $realm . '",qop="auth",nonce="' . uniqid() . '",opaque="' . md5($realm) . '"');
-  }
+    /* Note the space: the original produced `HTTP/1.1401 Unauthorized` */
+    header($_SERVER['SERVER_PROTOCOL'] . ' 401 Unauthorized');
+
+    header(sprintf(
+      'WWW-Authenticate: Digest realm="%s",qop="auth",nonce="%s",opaque="%s"',
+      $realm, authCreateNonce($users, $realm), hash('sha256', $realm)
+    ));
+  };
 
   /* Deny access if no digest is set */
   if(empty($_SERVER['PHP_AUTH_DIGEST']))
   {
-    createHeader($realm);
+    $createHeader();
     die('401 Unauthorized');
   }
 
   /* Get digest data */
-  $data = http_digest_parse($_SERVER['PHP_AUTH_DIGEST']);
+  $data = httpDigestParse($_SERVER['PHP_AUTH_DIGEST']);
 
   /* Deny access if data is invalid or username is unset */
   if(!$data || !isset($users[$data['username']]))
   {
-    createHeader($realm);
+    $createHeader();
     die('Invalid credentials.');
   }
 
-  $a1 = md5($data['username'] . ':' . $realm . ':' . $users[$data['username']]);
+  /**
+   * Reject any challenge this script did not issue, or that has expired.
+   * The nonce was previously `uniqid()`, which is derived from the clock and
+   * was never checked on the way back in
+   */
+  if(!authVerifyNonce($data['nonce'], $users, $realm))
+  {
+    $createHeader();
+    die('Invalid credentials.');
+  }
+
+  $credential = $users[$data['username']];
+
+  /**
+   * A credential may be given as a plaintext password, or as a precomputed
+   * HA1 prefixed with `md5:` so that a deployment does not have to store
+   * passwords in the clear. The prefix is explicit so that a password which
+   * happens to look like a hash is never mistaken for one
+   */
+  $a1 = strncmp($credential, 'md5:', 4) === 0
+    ? strtolower(substr($credential, 4))
+    : md5($data['username'] . ':' . $realm . ':' . $credential);
+
   $a2 = md5($_SERVER['REQUEST_METHOD'] . ':' . $data['uri']);
 
-  $validResponse = md5($a1 . ':' . $data['nonce'] . ':' . $data['nc'] . ':' . $data['cnonce'] . ':' . $data['qop'] . ':' . $a2);
+  $validResponse = md5(
+    $a1 . ':' . $data['nonce'] . ':' . $data['nc'] . ':' .
+    $data['cnonce'] . ':' . $data['qop'] . ':' . $a2
+  );
 
-  /* Deny access if data can't be verified */
-  if($data['response'] != $validResponse)
+  /* Deny access if data can't be verified, comparing in constant time */
+  if(!hash_equals($validResponse, (string) $data['response']))
   {
-    createHeader($realm);
+    $createHeader();
     die('Invalid credentials.');
   }
 }
@@ -625,7 +841,7 @@ if(file_exists(CONFIG_FILE))
 }
 
 /* Default configuration values. Used if values from the above config are unset */
-$defaults = array('authentication' => false,'single_page' => false,'format' => array('title' => 'Index of %s','date' => array('m/d/y H:i', 'd/m/y'),'sizes' => array(' B', ' KiB', ' MiB', ' GiB', ' TiB')),'icon' => array('path' => '/favicon.png','mime' => 'image/png'),'sorting' => array('enabled' => false,'order' => SORT_ASC,'types' => 0,'sort_by' => 'name','use_mbstring' => false),'gallery' => array('enabled' => true,'reverse_options' => false,'scroll_interval' => 50,'list_alignment' => 0,'fit_content' => true,'image_sharpen' => false),'preview' => array('enabled' => true,'hover_delay' => 75,'cursor_indicator' => true),'extensions' => array('image' => array('jpg', 'jpeg', 'png', 'gif', 'ico', 'svg', 'bmp', 'webp'),'video' => array('webm', 'mp4', 'ogv', 'ogg', 'mov')),'inject' => false,'style' => array('themes' => array('path' => '/<%= indexerPath %>/themes/','default' => false),'css' => array('additional' => false),'compact' => false),'filter' => array('file' => false,'directory' => false),'exclude' => false,'directory_sizes' => array('enabled' => false, 'recursive' => false),'processor' => false,'encode_all' => false,'allow_direct_access' => false,'path_checking' => 'strict','performance' => false,'footer' => array('enabled' => true, 'show_server_name' => true),'credits' => true,'debug' => false);
+$defaults = array('authentication' => false,'single_page' => false,'format' => array('title' => 'Index of %s','date' => array('m/d/y H:i', 'd/m/y'),'sizes' => array(' B', ' KiB', ' MiB', ' GiB', ' TiB')),'icon' => array('path' => '/favicon.png','mime' => 'image/png'),'sorting' => array('enabled' => false,'order' => SORT_ASC,'types' => 0,'sort_by' => 'name','use_mbstring' => false),'gallery' => array('enabled' => true,'reverse_options' => false,'scroll_interval' => 50,'list_alignment' => 0,'fit_content' => true,'image_sharpen' => false),'preview' => array('enabled' => true,'hover_delay' => 75,'cursor_indicator' => true),'extensions' => array('image' => array('jpg', 'jpeg', 'png', 'gif', 'ico', 'svg', 'bmp', 'webp'),'video' => array('webm', 'mp4', 'ogv', 'ogg', 'mov')),'inject' => false,'style' => array('themes' => array('path' => '/<%= indexerPath %>/themes/','default' => false),'css' => array('additional' => false),'compact' => false),'filter' => array('file' => false,'directory' => false),'exclude' => false,'directory_sizes' => array('enabled' => false, 'recursive' => false),'processor' => false,'encode_all' => false,'allow_direct_access' => false,'path_checking' => 'strict','trust_prepend_header' => false,'performance' => false,'footer' => array('enabled' => true, 'show_server_name' => true),'credits' => true,'debug' => false);
 
 /**
  * Call authentication function
@@ -1032,16 +1248,16 @@ class Indexer extends Helpers
         'data-raw' => $fileName
       ], parent::createElement(
         'a', $anchorAttributes, $fileName
-      ));
+      ), true);
 
       /** Create modified column */
       $tdModified = parent::createElement('td', [
         'data-raw' => $fileModified[0]
       ], implode('', [
         parent::createElement(
-          'span', [], $fileModified[1]
+          'span', [], $fileModified[1], true
         )
-      ]));
+      ]), true);
 
       /** Create size column */
       $tdSize = parent::createElement('td', [
@@ -1060,13 +1276,13 @@ class Indexer extends Helpers
         parent::createElement(
           'span', ['data-view' => 'mobile'], '[Save]'
         )
-      ]));
+      ]), true);
 
       /** Create save column */
       $tdSave = parent::createElement('td', [
         'data-raw' => $fileType[0],
         'class' => 'download'
-      ], $anchorSave);
+      ], $anchorSave, true);
 
       /** Create container and add to rows */
       $rows[] = parent::createElement('tr', [
@@ -1076,7 +1292,7 @@ class Indexer extends Helpers
         $tdModified,
         $tdSize,
         $tdSave
-      ]));
+      ]), true);
     }
 
     return [
@@ -1127,16 +1343,16 @@ class Indexer extends Helpers
         'a', [
           'href' => $url
         ], '[' . $dir[1] . ']'
-      ));
+      ), true);
 
       /** Create modified column */
       $tdModified = parent::createElement('td', [
         'data-raw' => $dir['modified'][0]
       ], implode('', [
         parent::createElement(
-          'span', [], $dir['modified'][1]
+          'span', [], $dir['modified'][1], true
         )
-      ]));
+      ]), true);
 
       /** Create size column */
       $tdSize = parent::createElement('td', $this->directorySizes['enabled']
@@ -1145,7 +1361,7 @@ class Indexer extends Helpers
       );
 
       $tdType = parent::createElement(
-        'td', [], parent::createElement('span', [], '-')
+        'td', [], parent::createElement('span', [], '-'), true
       );
 
       /** Create container and add to rows */
@@ -1156,7 +1372,7 @@ class Indexer extends Helpers
         $tdModified,
         $tdSize,
         $tdType
-      ]));
+      ]), true);
 
       if(($mostRecentTimestamp === 0)
         || $dir['modified'][0] > $mostRecentTimestamp)
@@ -1234,12 +1450,12 @@ class Indexer extends Helpers
     ], implode('', array_merge([
       parent::createElement('td', [], parent::createElement('a', [
           'href' => $parentHref
-        ], '[Parent Directory]'))
+        ], '[Parent Directory]'), true)
       ],
       array_fill(0, 3, parent::createElement('td', [], parent::createElement(
         'span', [], '-'
-      ))))
-    ));
+      ), true)))
+    ), true);
 
     /** Request data */
     $data = [
@@ -1507,9 +1723,13 @@ class Indexer extends Helpers
         ], $format);
       }
     } else {
-      $formatted = self::formatDate(
+      /**
+       * Encode here so that the second element is uniformly safe markup in
+       * both branches, since callers wrap it without escaping
+       */
+      $formatted = parent::escape(self::formatDate(
         $this->format['date'][0], $stamp, $modifier
-      );
+      ));
     }
 
     return [$stamp, $formatted];
@@ -1957,10 +2177,31 @@ if($cookies['sorting']['ascending'] !== NULL
 if(isset($_SERVER['INDEXER_PREPEND_PATH']))
 {
   $prependPath = $_SERVER['INDEXER_PREPEND_PATH'];
-} else if(isset($_SERVER['HTTP_X_INDEXER_PREPEND_PATH']))
+} else if($config['trust_prepend_header']
+  && isset($_SERVER['HTTP_X_INDEXER_PREPEND_PATH']))
 {
+  /**
+   * Only read from the request header when the operator has opted in. Any
+   * client can send this header, and it rewrites every link on the page, so
+   * honouring it unconditionally hands link control to the visitor
+   */
   $prependPath = $_SERVER['HTTP_X_INDEXER_PREPEND_PATH'];
 } else {
+  $prependPath = '';
+}
+
+/**
+ * Constrain the prepend value to something path shaped regardless of where it
+ * came from, so a malformed proxy configuration cannot feed arbitrary text
+ * into the generated markup
+ */
+if($prependPath !== '' && !preg_match('#^[A-Za-z0-9._~!$&\'()*+,;=:@/%-]*$#', $prependPath))
+{
+  error_log(sprintf(
+    'IVFi: discarding prepend path containing unexpected characters: %s',
+    $prependPath
+  ));
+
   $prependPath = '';
 }
 
@@ -2000,23 +2241,36 @@ try
   /** Get error code */
   $eCode = $e->getCode();
 
-  echo implode('', [
-    Helpers::createElement('h3', [], 'Error:'),
-    Helpers::createElement('p', [], $e . '({' . $eCode . '})')
-  ]);
+  /**
+   * Always record the full exception server-side, and never send it to the
+   * client outside of debug mode. Its string form carries the stack trace,
+   * which exposes absolute filesystem paths and the internal call structure
+   */
+  error_log(sprintf('IVFi: %s', $e));
 
-  if($eCode === 1 || $eCode === 2)
+  echo Helpers::createElement('h3', [], 'Error:');
+
+  if($config['debug'])
   {
+    echo Helpers::createElement('p', [], $e . '({' . $eCode . '})');
+
+    if($eCode === 1 || $eCode === 2)
+    {
+      echo Helpers::createElement(
+        'p', [], sprintf(
+          'This error occurs when the requested directory is below the directory of the PHP file. %s',
+          $eCode === 1
+            ? (
+                '<br/>You can try setting <b>path_checking</b> to <b>weak</b> ' .
+                'if you are working with symbolic links etc.'
+              )
+            : ''
+        ), true
+      );
+    }
+  } else {
     echo Helpers::createElement(
-      'p', [], sprintf(
-        'This error occurs when the requested directory is below the directory of the PHP file. %s',
-        $eCode === 1
-          ? (
-              '<br/>You can try setting <b>path_checking</b> to <b>weak</b> ' . 
-              'if you are working with symbolic links etc.'
-            )
-          : ''
-      )
+      'p', [], 'The request could not be completed. Check the server error log for details.'
     );
   }
 
@@ -2297,14 +2551,14 @@ function constructFooter($renderTime, $currentDirectory, $config, $version)
       'class' => 'currentPageInfo'
     ], sprintf('Page generated in %s', Helpers::createElement('span', [
       'class' => 'generationTime'
-    ], sprintf("%.6f", $renderTime) . 's')))
+    ], sprintf("%.6f", $renderTime) . 's')), true)
   ];
 
   $footerHtml[] = Helpers::createElement('div', [], sprintf(
     'Browsing %s%s', Helpers::createElement(
       'span', [], $currentDirectory
     ), constructServerNameNotice()
-  ));
+  ), true);
 
   if($config['credits'] !== false)
   {
@@ -2316,7 +2570,7 @@ function constructFooter($renderTime, $currentDirectory, $config, $version)
         'href' => 'https://git.five.sh/ivfi/'
       ], 'IVFi'),
       Helpers::createElement('span', [], $version)
-    ]));
+    ]), true);
   }
 
   return sprintf(
