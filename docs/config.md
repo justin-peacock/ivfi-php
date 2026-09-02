@@ -57,8 +57,9 @@ link in the footer.
 |-----|------|---------|-------------|
 | `users` | Array | `username => hash` | Valid users, where each value is a `password_hash()` output. Plaintext is refused. |
 | `restrict` | String | `regex` | Applies authentication only to paths matching the expression. |
-| `behind_proxy` | Bool | `false` | Trust `X-Forwarded-Proto` when deciding whether to mark the cookie `Secure`. Enable this **only** behind a proxy that strips the header from client requests. |
-| `throttle_path` | String | system temp dir | Directory holding the failed-attempt counter. Must be writable by the web server. |
+| `behind_proxy` | Bool | `false` | Trust forwarded headers for the client address and protocol. Enable this **only** behind a proxy that overwrites them on the way in. |
+| `client_ip_header` | String | `X-Forwarded-For` | Which header carries the client address when `behind_proxy` is set. Use `CF-Connecting-IP` behind Cloudflare. |
+| `throttle_path` | String | system temp dir | Directory holding the failed-attempt counter. Must be writable by the web server. The filename includes a hash of the script path, so two installations on one host do not share a counter. |
 
 ### Generating a credential
 
@@ -81,7 +82,27 @@ disk.
 - A token on the form, and on the sign-out link, so neither can be triggered from another site.
 - The same message for an unknown user and a wrong password, so the form cannot be used to enumerate accounts.
 - Five failed attempts from an address lock it out for fifteen minutes, and the correct password is refused during the lockout too.
+- The sign-out link carries its own token, separate from the form token, because it ends up in browser history and access logs.
 - Sessions stop being accepted after twelve hours idle.
+
+### Behind a reverse proxy
+
+Set `behind_proxy` when a proxy terminates TLS or forwards to this script. Two
+things depend on it.
+
+Without it, `REMOTE_ADDR` is the **proxy** for every visitor, so the lockout
+counter treats all traffic as one client: five bad attempts from anybody locks
+out everybody for fifteen minutes, which an unauthenticated attacker can keep up
+indefinitely. With it, the address comes from `client_ip_header` instead.
+
+Also without it, the session cookie is not marked `Secure` on an HTTPS site,
+because the script only sees the plaintext hop from the proxy.
+
+> Only enable it behind a proxy that **overwrites** these headers. A client can
+> send `X-Forwarded-For` itself, so trusting it on a directly reachable server
+> lets a visitor pick their own throttle bucket and evade the lockout entirely.
+> Cloudflare overwrites `CF-Connecting-IP`, which is why it is the right choice
+> there.
 
 ### A note on strength
 

@@ -28,7 +28,10 @@ final class Server
     /** @var array<string, string> */
     private array $cookies = [];
 
-    public function __construct(private Fixture $fixture)
+    /**
+     * @param array<string, string> $ini Extra php.ini settings for the server
+     */
+    public function __construct(private Fixture $fixture, private array $ini = [])
     {
         $this->port = self::freePort();
         $this->router = sprintf(
@@ -66,10 +69,16 @@ PHP);
             );
         }
 
+        $arguments = [PHP_BINARY, '-d', 'display_errors=0'];
+
+        foreach ($this->ini as $name => $value) {
+            $arguments[] = '-d';
+            $arguments[] = $name . '=' . $value;
+        }
+
         $this->process = proc_open(
             [
-                PHP_BINARY,
-                '-d', 'display_errors=0',
+                ...$arguments,
                 '-S', '127.0.0.1:' . $this->port,
                 '-t', $this->fixture->root(),
                 $this->router,
