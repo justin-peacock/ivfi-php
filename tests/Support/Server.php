@@ -38,7 +38,7 @@ final class Server
          * PHP_AUTH_DIGEST, so bridge the two. Kept outside the document root
          * so the router does not appear in the listing it is serving.
          */
-        file_put_contents($this->router, <<<'PHP'
+        $written = file_put_contents($this->router, <<<'PHP'
 <?php
 if (isset($_SERVER['HTTP_AUTHORIZATION'])
     && stripos($_SERVER['HTTP_AUTHORIZATION'], 'Digest ') === 0) {
@@ -57,6 +57,12 @@ if ($path !== '/' && is_file($file) && substr($file, -4) !== '.php') {
 require $root . '/indexer.php';
 PHP);
 
+        if ($written === false) {
+            throw new \RuntimeException(
+                "Could not write the router to {$this->router}"
+            );
+        }
+
         $this->process = proc_open(
             [
                 PHP_BINARY,
@@ -71,10 +77,19 @@ PHP);
         );
 
         if (!is_resource($this->process)) {
+            /* The destructor never runs for an object whose constructor threw */
+            @unlink($this->router);
+
             throw new \RuntimeException('Could not start the built-in server');
         }
 
-        $this->waitUntilReady();
+        try {
+            $this->waitUntilReady();
+        } catch (\RuntimeException $e) {
+            $this->stop();
+
+            throw $e;
+        }
     }
 
     /**

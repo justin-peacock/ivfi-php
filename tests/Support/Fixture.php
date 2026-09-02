@@ -31,7 +31,21 @@ final class Fixture
             throw new \RuntimeException("Could not create fixture at {$this->root}");
         }
 
-        copy(__DIR__ . '/../../build/indexer.php', $this->root . '/indexer.php');
+        $build = __DIR__ . '/../../build/indexer.php';
+
+        /**
+         * Fail here rather than letting every test in the class report a
+         * confusing "path does not exist" against a fixture with no script in
+         * it. The directory is removed first, because a constructor that
+         * throws leaves an object the destructor never runs for.
+         */
+        if (!is_file($build) || !copy($build, $this->root . '/indexer.php')) {
+            $this->remove($this->root);
+
+            throw new \RuntimeException(
+                "Could not copy {$build} into the fixture at {$this->root}"
+            );
+        }
     }
 
     public function root(): string

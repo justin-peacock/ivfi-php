@@ -38,32 +38,39 @@ final class Indexer
             '%s/ivfi-run-%s.php', sys_get_temp_dir(), bin2hex(random_bytes(6))
         );
 
-        file_put_contents($runner, sprintf(
+        $written = file_put_contents($runner, sprintf(
             "<?php\n\$_SERVER = array_merge(\$_SERVER, %s);\nrequire %s;\n",
             var_export($server, true),
             var_export($fixture->root() . '/indexer.php', true)
         ));
 
-        $process = proc_open(
-            [PHP_BINARY, '-d', 'display_errors=0', '-d', 'error_reporting=E_ALL', $runner],
-            [1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
-            $pipes,
-            $fixture->root()
-        );
-
-        if (!is_resource($process)) {
-            throw new \RuntimeException('Could not start the indexer process');
+        if ($written === false) {
+            throw new \RuntimeException("Could not write the runner to {$runner}");
         }
 
-        $stdout = (string) stream_get_contents($pipes[1]);
-        $stderr = (string) stream_get_contents($pipes[2]);
+        /* finally, so a failure to start does not leave the runner behind */
+        try {
+            $process = proc_open(
+                [PHP_BINARY, '-d', 'display_errors=0', '-d', 'error_reporting=E_ALL', $runner],
+                [1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
+                $pipes,
+                $fixture->root()
+            );
 
-        fclose($pipes[1]);
-        fclose($pipes[2]);
+            if (!is_resource($process)) {
+                throw new \RuntimeException('Could not start the indexer process');
+            }
 
-        $status = proc_close($process);
+            $stdout = (string) stream_get_contents($pipes[1]);
+            $stderr = (string) stream_get_contents($pipes[2]);
 
-        @unlink($runner);
+            fclose($pipes[1]);
+            fclose($pipes[2]);
+
+            $status = proc_close($process);
+        } finally {
+            @unlink($runner);
+        }
 
         return new Response($stdout, $stderr, $status);
     }
