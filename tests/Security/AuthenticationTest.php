@@ -533,6 +533,43 @@ final class AuthenticationTest extends IndexerTestCase
     }
 
     /**
+     * Nothing stops somebody having a user named after one of the options. A
+     * hash is a hash whatever the key is called, and under the nested form
+     * there is no ambiguity to resolve.
+     */
+    public function testUsernameMatchingAnOptionNameStillWorks(): void
+    {
+        $fixture = new Fixture('option-named-user');
+        $fixture->file('private.jpg');
+        $fixture->config([
+            'authentication' => [
+                'users' => ['restrict' => password_hash(self::PASS, PASSWORD_DEFAULT)],
+                'throttle_path' => $fixture->root(),
+            ],
+        ]);
+
+        $server = new Server($fixture);
+        $this->servers[] = $server;
+
+        $login = $server->request('/');
+
+        $this->assertStringContainsString(
+            'name="ivfi_pass"',
+            $login->body,
+            'a user named after an option was reported as a misconfiguration'
+        );
+
+        $result = $server->request('/', [], [
+            'ivfi_user' => 'restrict',
+            'ivfi_pass' => self::PASS,
+            'ivfi_csrf' => $this->token($login),
+        ]);
+
+        $this->assertSame('302 Found', $result->header('Status'));
+        $this->assertStringContainsString('private.jpg', $server->request('/')->body);
+    }
+
+    /**
      * The unknown-user path verifies against a configured hash, so it has to
      * keep working whatever algorithm the operator chose.
      */

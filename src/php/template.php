@@ -779,8 +779,12 @@ function authThrottle($options, $action)
     return 0;
   }
 
-  /* Counts are nobody else's business, and the file is often in a shared directory */
-  if(!$existed)
+  /**
+   * Counts are nobody else's business, and the file often sits in a shared
+   * directory. Checked every time rather than only on creation, so a file
+   * left behind by an earlier version does not stay readable
+   */
+  if(!$existed || (fileperms($path) & 0777) !== 0600)
   {
     @chmod($path, 0600);
   }
@@ -989,10 +993,21 @@ function authCredentialsAreHashed($users)
 
   foreach($users as $name => $credential)
   {
+    if(is_string($credential) && !empty(password_get_info($credential)['algo']))
+    {
+      /**
+       * A hash is a hash whatever the key is called. Nothing stops somebody
+       * having a user named `restrict`, and under the nested form that is not
+       * ambiguous at all
+       */
+      continue;
+    }
+
     /**
-     * With the flat form the option keys sit in the same array, so say which
-     * key is wrong rather than reporting a password hash problem that points
-     * nowhere near the actual mistake
+     * With the flat form the option keys share the array with the users, so a
+     * key that names an option and does not hold a hash is almost certainly a
+     * misplaced option. Say which one, rather than reporting a password hash
+     * problem that points nowhere near the actual mistake
      */
     if(isset($options[$name]))
     {
@@ -1004,14 +1019,11 @@ function authCredentialsAreHashed($users)
       return false;
     }
 
-    if(!is_string($credential) || empty(password_get_info($credential)['algo']))
-    {
-      error_log(sprintf(
-        'IVFi: the credential for \'%s\' is not a password_hash() value.', $name
-      ));
+    error_log(sprintf(
+      'IVFi: the credential for \'%s\' is not a password_hash() value.', $name
+    ));
 
-      return false;
-    }
+    return false;
   }
 
   return true;
@@ -1032,7 +1044,6 @@ function authCredentialsAreHashed($users)
  */
 function authenticate($users, $realm, $options = [])
 {
-  $trustProxy = !empty($options['behind_proxy']);
 
   /**
    * Close any session that was already running before taking over.
@@ -3040,7 +3051,7 @@ function constructSessionNotice()
     'Signed in as %s%s',
     Helpers::createElement('span', [], $_SESSION['user']),
     Helpers::createElement('a', [
-      /* Carries the session token, so a link from elsewhere cannot sign you out */
+      /* Its own token, not the form one, since this value reaches logs and history */
       'href' => sprintf('?%s=%s', AUTH_PARAM_LOGOUT, rawurlencode($_SESSION['logout'])),
       'class' => 'signOut'
     ], 'Sign out')
