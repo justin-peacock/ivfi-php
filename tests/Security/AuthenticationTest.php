@@ -8,6 +8,7 @@ use Ivfi\Tests\Support\Fixture;
 use Ivfi\Tests\Support\IndexerTestCase;
 use Ivfi\Tests\Support\Response;
 use Ivfi\Tests\Support\Server;
+use PHPUnit\Framework\Attributes\DataProvider;
 
 /**
  * Session authentication, which replaced HTTP digest.
@@ -229,6 +230,74 @@ final class AuthenticationTest extends IndexerTestCase
     }
 
     /**
+     * The counter is keyed on the address alone. Were the username part of the
+     * key, one address could try a common password against a list of names and
+     * never trip a lockout, because each name would carry its own count.
+     */
+    public function testVaryingTheUsernameDoesNotEvadeTheLockout(): void
+    {
+        $server = $this->serve();
+
+        $names = ['alice', 'bob', 'carol', 'dave', 'erin'];
+
+        foreach ($names as $name) {
+            $login = $server->request('/');
+
+            $server->request('/', [], [
+                'ivfi_user' => $name,
+                'ivfi_pass' => 'wrong',
+                'ivfi_csrf' => $this->token($login),
+            ]);
+        }
+
+        $result = $this->signIn($server, self::PASS);
+
+        $this->assertSame(
+            '429 Too Many Requests',
+            $result->header('Status'),
+            'spraying different usernames from one address avoided the lockout'
+        );
+    }
+
+    /**
+     * Destroying the session server-side is not enough on its own: without
+     * expiring the cookie the browser keeps presenting the old identifier.
+     */
+    public function testSignOutExpiresTheSessionCookie(): void
+    {
+        $server = $this->serve();
+
+        $this->signIn($server, self::PASS);
+
+        $listing = $server->request('/');
+
+        preg_match('#href="\?ivfi_logout=([^"]+)"#', $listing->body, $m);
+
+        $this->assertNotEmpty($m[1] ?? '');
+
+        $logout = $server->request('/?ivfi_logout=' . $m[1]);
+
+        $attributes = $logout->cookieAttributes('IVFISESS');
+
+        $this->assertNotEmpty($attributes, 'sign-out set no cookie at all');
+
+        $expiry = '';
+
+        foreach ($attributes as $attribute) {
+            if (strpos($attribute, 'expires=') === 0) {
+                $expiry = substr($attribute, 8);
+            }
+        }
+
+        $this->assertNotSame('', $expiry, 'the sign-out cookie carried no expiry');
+        $this->assertLessThan(
+            time(),
+            strtotime($expiry),
+            'the sign-out cookie was not expired'
+        );
+    }
+
+    /**
      * A lockout that the right password walks through is not a lockout.
      */
     public function testLockoutAlsoRefusesTheCorrectPassword(): void
@@ -261,6 +330,86 @@ final class AuthenticationTest extends IndexerTestCase
         $result = $this->signIn($server, 'just-a-plain-password');
 
         $this->assertStringNotContainsString('private.jpg', $result->body);
+    }
+
+    /**
+     * The redirect after signing in is built from the request target, which is
+     * the request line as the client wrote it. `//evil.example/` survives
+     * unaltered and is a protocol relative URL, so echoing it back would bounce
+     * the visitor off-site immediately after they authenticated on the real
+     * domain, which is a ready-made phishing hop.
+     *
+     */
+    #[DataProvider('offsiteTargets')]
+    public function testSignInRedirectCannotLeaveTheSite(string $target): void
+    {
+        $server = $this->serve();
+
+        $login = $server->request('/');
+
+        $result = $server->request($target, [], [
+            'ivfi_user' => self::USER,
+            'ivfi_pass' => self::PASS,
+            'ivfi_csrf' => $this->token($login),
+        ]);
+
+        $location = (string) $result->header('Location');
+
+        $this->assertDoesNotMatchRegularExpression(
+            '#^(?://|https?:)#i',
+            $location,
+            sprintf('signing in at %s redirected off-site to %s', $target, $location)
+        );
+    }
+
+    #[DataProvider('offsiteTargets')]
+    public function testSignOutRedirectCannotLeaveTheSite(string $target): void
+    {
+        $server = $this->serve();
+
+        $this->signIn($server, self::PASS);
+
+        $result = $server->request(rtrim($target, '/') . '/?ivfi_logout=x');
+
+        $location = (string) $result->header('Location');
+
+        $this->assertDoesNotMatchRegularExpression(
+            '#^(?://|https?:)#i',
+            $location,
+            sprintf('signing out at %s redirected off-site to %s', $target, $location)
+        );
+    }
+
+    /**
+     * @return array<string, list<string>>
+     */
+    public static function offsiteTargets(): array
+    {
+        return [
+            'protocol relative'   => ['//evil.example/'],
+            'absolute form'       => ['https://evil.example/x'],
+            'backslash authority' => ['/\\evil.example/'],
+            'triple slash'        => ['///evil.example/'],
+        ];
+    }
+
+    /**
+     * The guard must not cost an ordinary redirect its destination.
+     */
+    public function testSignInReturnsToTheRequestedPath(): void
+    {
+        $server = $this->serve();
+
+        $server->request('/');
+        $login = $server->request('/');
+
+        $result = $server->request('/photos/?sort=name', [], [
+            'ivfi_user' => self::USER,
+            'ivfi_pass' => self::PASS,
+            'ivfi_csrf' => $this->token($login),
+        ]);
+
+        $this->assertSame('/photos/?sort=name', $result->header('Location'));
     }
 
     /**

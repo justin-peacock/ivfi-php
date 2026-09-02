@@ -655,17 +655,19 @@ function authThrottlePath($options)
 }
 
 /**
- * Identifies an attempt without storing who made it
+ * Identifies the source of an attempt without storing who made it
  *
- * @param String  $username  The attempted username
+ * Keyed on the address alone, deliberately. Including the username would let
+ * one address try a common password against a list of names without ever
+ * tripping a lockout, since each name would carry its own count.
  *
  * @return String
  */
-function authThrottleKey($username)
+function authThrottleKey()
 {
   $address = isset($_SERVER['REMOTE_ADDR']) ? $_SERVER['REMOTE_ADDR'] : '-';
 
-  return hash('sha256', strtolower($username) . '|' . $address);
+  return hash('sha256', $address);
 }
 
 /**
@@ -676,15 +678,14 @@ function authThrottleKey($username)
  * session would be discarded by the client along with the cookie.
  *
  * @param Array   $options   Authentication options
- * @param String  $username  The attempted username
  * @param String  $action    One of 'check', 'fail' or 'clear'
  *
  * @return Integer  Seconds remaining on a lockout, or 0
  */
-function authThrottle($options, $username, $action)
+function authThrottle($options, $action)
 {
   $path = authThrottlePath($options);
-  $key = authThrottleKey($username);
+  $key = authThrottleKey();
   $now = time();
 
   $handle = @fopen($path, 'c+');
@@ -756,6 +757,46 @@ function authThrottle($options, $username, $action)
   return $remaining;
 }
 
+/**
+ * The current request target, reduced to a path this site can serve
+ *
+ * Never build a `Location` header out of `REQUEST_URI` directly. It is the
+ * request line as the client wrote it, so `//evil.example/` arrives intact and
+ * is a protocol relative URL: sending it back redirects the visitor off-site.
+ * On a sign-in flow that is a ready-made phishing hop, since the victim
+ * authenticates on the real domain and lands somewhere else.
+ *
+ * @param Boolean  $keepQuery  Whether to carry the query string over
+ *
+ * @return String
+ */
+function authLocalTarget($keepQuery = true)
+{
+  $uri = isset($_SERVER['REQUEST_URI']) ? (string) $_SERVER['REQUEST_URI'] : '/';
+
+  /* Drops any scheme and authority an absolute-form request line carries */
+  $parts = parse_url($uri);
+
+  if($parts === false)
+  {
+    return '/';
+  }
+
+  $path = (isset($parts['path']) && $parts['path'] !== '') ? $parts['path'] : '/';
+
+  /**
+   * Collapse leading slashes and backslashes, so neither `//host` nor the
+   * `/\host` that some clients normalise to it can survive
+   */
+  $path = '/' . ltrim($path, "/\\");
+
+  if($keepQuery && isset($parts['query']) && $parts['query'] !== '')
+  {
+    $path .= '?' . $parts['query'];
+  }
+
+  return $path;
+}
 /**
  * Renders the login page and stops
  *
@@ -929,10 +970,41 @@ function authenticate($users, $realm, $options = [])
       && hash_equals($_SESSION['csrf'], (string) $_GET[AUTH_PARAM_LOGOUT]))
     {
       $_SESSION = [];
+
+      /**
+       * Expire the cookie as well. `session_destroy()` only drops the data on
+       * the server, so the browser would keep presenting the old identifier
+       * and it would be adopted as the next anonymous session
+       */
+      if(ini_get('session.use_cookies'))
+      {
+        $cookie = session_get_cookie_params();
+        $expired = time() - 42000;
+
+        if(PHP_VERSION_ID >= 70300)
+        {
+          setcookie(session_name(), '', [
+            'expires' => $expired,
+            'path' => $cookie['path'],
+            'domain' => $cookie['domain'],
+            'secure' => $cookie['secure'],
+            'httponly' => $cookie['httponly'],
+            'samesite' => isset($cookie['samesite']) && $cookie['samesite'] !== ''
+              ? $cookie['samesite']
+              : 'Lax'
+          ]);
+        } else {
+          setcookie(
+            session_name(), '', $expired, $cookie['path'],
+            $cookie['domain'], $cookie['secure'], $cookie['httponly']
+          );
+        }
+      }
+
       session_destroy();
     }
 
-    header('Location: ' . strtok((string) $_SERVER['REQUEST_URI'], '?'));
+    header('Location: ' . authLocalTarget(false));
 
     exit;
   }
@@ -984,7 +1056,7 @@ function authenticate($users, $realm, $options = [])
     authRenderLogin('Your session expired. Please try again.');
   }
 
-  $locked = authThrottle($options, $username, 'check');
+  $locked = authThrottle($options, 'check');
 
   if($locked > 0)
   {
@@ -1004,13 +1076,13 @@ function authenticate($users, $realm, $options = [])
 
   if(!password_verify($password, $hash) || !$known)
   {
-    authThrottle($options, $username, 'fail');
+    authThrottle($options, 'fail');
 
     /* One message for both cases, so it reveals nothing about which failed */
     authRenderLogin('Incorrect username or password.');
   }
 
-  authThrottle($options, $username, 'clear');
+  authThrottle($options, 'clear');
 
   /* A new identifier on login, so a fixed one cannot be reused */
   session_regenerate_id(true);
@@ -1020,7 +1092,7 @@ function authenticate($users, $realm, $options = [])
   $_SESSION['csrf'] = bin2hex(random_bytes(32));
 
   /* Redirect so a refresh does not repost the form */
-  header('Location: ' . (string) $_SERVER['REQUEST_URI']);
+  header('Location: ' . authLocalTarget());
 
   exit;
 }
