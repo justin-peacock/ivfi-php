@@ -2,9 +2,11 @@ name: Build
 
 on:
   push:
-    branches: [ master ]
+    # master is kept so the workflow still fires if these changes are
+    # offered upstream, where that is the default branch
+    branches: [ main, master ]
   pull_request:
-    branches: [ master ]
+    branches: [ main, master ]
   workflow_dispatch:
 
 jobs:
