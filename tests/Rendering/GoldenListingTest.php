@@ -1,0 +1,158 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Ivfi\Tests\Rendering;
+
+use Ivfi\Tests\Support\Fixture;
+use Ivfi\Tests\Support\Indexer;
+use Ivfi\Tests\Support\IndexerTestCase;
+
+/**
+ * Snapshots of the whole rendered page.
+ *
+ * The encoding work touched the one function every element passes through, so
+ * the risk was never that a hostile name slipped out, it was that an ordinary
+ * page changed shape without anyone noticing. These lock the output down so a
+ * refactor has to justify any difference.
+ *
+ * Regenerate with `UPDATE_GOLDEN=1 vendor/bin/phpunit`, and read the diff
+ * before committing it.
+ */
+final class GoldenListingTest extends IndexerTestCase
+{
+    private const GOLDEN_DIR = __DIR__ . '/golden';
+
+    /**
+     * A tree that covers each row type and each column, with names that are
+     * ordinary enough to stay readable in the snapshot.
+     */
+    private function tree(Fixture $fixture): void
+    {
+        $fixture->directory('albums');
+        $fixture->directory('notes dir');
+
+        $fixture->file('photo.jpg', str_repeat('a', 2048));
+        $fixture->file('clip.mp4', str_repeat('b', 1048576));
+        $fixture->file('empty.txt', '');
+        $fixture->file('read me.txt', 'hello');
+        $fixture->file('unicode-café.png', 'c');
+        $fixture->file('archive.tar.gz', str_repeat('d', 100));
+    }
+
+    /**
+     * Removes the parts that legitimately move between runs.
+     */
+    private function normalise(string $html): string
+    {
+        return preg_replace(
+            [
+                '/"bust":"[a-f0-9]+"/',
+                '/bust=[a-f0-9]+/',
+                '/[0-9]+\.[0-9]{6}s/',
+                '/"timestamp":[0-9]+/',
+                '/data-raw="1[0-9]{9}"/',
+            ],
+            [
+                '"bust":"BUST"',
+                'bust=BUST',
+                'TIMEs',
+                '"timestamp":TIMESTAMP',
+                'data-raw="MTIME"',
+            ],
+            $html
+        );
+    }
+
+    private function assertMatchesGolden(string $name, string $actual): void
+    {
+        $path = self::GOLDEN_DIR . '/' . $name . '.html';
+
+        if (!is_dir(self::GOLDEN_DIR)) {
+            mkdir(self::GOLDEN_DIR, 0755, true);
+        }
+
+        if (getenv('UPDATE_GOLDEN') === '1' || !file_exists($path)) {
+            file_put_contents($path, $actual);
+
+            if (getenv('UPDATE_GOLDEN') !== '1') {
+                $this->fail(sprintf(
+                    'No golden file for "%s"; wrote one. Review %s and re-run.',
+                    $name,
+                    $path
+                ));
+            }
+        }
+
+        $this->assertSame(
+            file_get_contents($path),
+            $actual,
+            sprintf(
+                'Rendered output no longer matches %s. If the change is intended, '
+                . 'regenerate with UPDATE_GOLDEN=1 and review the diff.',
+                $path
+            )
+        );
+    }
+
+    public function testRootListing(): void
+    {
+        $fixture = new Fixture('golden-root');
+        $this->tree($fixture);
+
+        $response = Indexer::render($fixture);
+
+        $this->assertSame('', $response->stderr);
+        $this->assertMatchesGolden('root-listing', $this->normalise($response->body));
+    }
+
+    public function testSubdirectoryListing(): void
+    {
+        $fixture = new Fixture('golden-sub');
+        $fixture->directory('albums');
+        $fixture->file('albums/one.jpg', 'a');
+        $fixture->file('albums/two.png', 'bb');
+
+        $response = Indexer::render($fixture, '/albums/');
+
+        $this->assertSame('', $response->stderr);
+        $this->assertMatchesGolden('subdirectory-listing', $this->normalise($response->body));
+    }
+
+    public function testEmptyDirectoryListing(): void
+    {
+        $fixture = new Fixture('golden-empty');
+        $fixture->directory('nothing');
+
+        $response = Indexer::render($fixture, '/nothing/');
+
+        $this->assertSame('', $response->stderr);
+        $this->assertMatchesGolden('empty-listing', $this->normalise($response->body));
+    }
+
+    /**
+     * The rows for hostile names are snapshotted too, so that a future change
+     * to the encoding shows up as a readable diff rather than only as a pass
+     * or fail on the injection assertions.
+     */
+    public function testHostileNamesListing(): void
+    {
+        $fixture = new Fixture('golden-hostile');
+
+        foreach ($this->hostileNames() as $name) {
+            $fixture->file($name . '.jpg');
+        }
+
+        if ($fixture->skipped() !== []) {
+            $this->markTestSkipped(sprintf(
+                'the filesystem rejected %d name(s), so the snapshot would not be stable',
+                count($fixture->skipped())
+            ));
+        }
+
+        $response = Indexer::render($fixture);
+
+        $this->assertSame('', $response->stderr);
+        $this->assertMatchesGolden('hostile-names-rows', $this->normalise($response->rows()));
+    }
+}

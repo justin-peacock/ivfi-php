@@ -55,3 +55,31 @@ You can edit `build.options.json` to enable extra features or change output opti
 * `extrasDir` sets the directory where `extras` are located.
 
 * `assetDir` sets the directory where resources (`.js`, `.css` and fonts) will be placed in. This also affects any references in the HTML/CSS.
+
+## Testing
+
+The PHP suite runs against the **built** `indexer.php` rather than the webpack
+template, so build before testing:
+
+```bash
+npm run build
+composer install
+vendor/bin/phpunit
+```
+
+It covers output encoding against a fixture tree of hostile filenames, the
+prepend-path header, error handling, path containment, and a real HTTP digest
+exchange. There are also golden-file snapshots of whole rendered listings.
+
+When a change to the markup is intended, regenerate the snapshots and read the
+diff before committing it:
+
+```bash
+UPDATE_GOLDEN=1 vendor/bin/phpunit
+```
+
+The authentication tests drive a genuine digest challenge and response, which
+needs a CGI binary because the CLI does not emit response headers. They skip if
+`php-cgi` is missing; set `IVFI_REQUIRE_CGI=1` to turn that skip into a failure,
+as CI does.
+
