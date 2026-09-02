@@ -94,10 +94,19 @@ final class Fixture
      */
     public function config(array $config): void
     {
+        $path = $this->root . '/indexer.config.php';
+
         file_put_contents(
-            $this->root . '/indexer.config.php',
+            $path,
             "<?php\nreturn " . var_export($config, true) . ";\n"
         );
+
+        /**
+         * Pinned like every other entry: the config sits in the directory it
+         * configures, so it is listed, and a live timestamp on it would move
+         * the rendered date on every run
+         */
+        touch($path, 1704110400);
     }
 
     public function __destruct()

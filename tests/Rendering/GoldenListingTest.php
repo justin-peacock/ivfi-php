@@ -84,15 +84,33 @@ final class GoldenListingTest extends IndexerTestCase
     }
 
     /**
-     * Orders rows by their own text, so a difference in how a filesystem hands
-     * back directory entries cannot fail the snapshot.
+     * Puts the rows in a fixed order.
+     *
+     * Listing order depends on what the filesystem hands back, which differs
+     * between platforms, so a snapshot that encodes it describes the machine
+     * rather than the renderer. Order is worth testing, but as a property
+     * rather than a snapshot: see OrderingTest.
      */
-    private function sortRows(string $rows): string
+    private function orderRows(string $html): string
     {
-        $lines = explode("\n", $rows);
-        sort($lines, SORT_STRING);
+        preg_match_all('#<tr class="(?:file|directory|parent)">.*?</tr>#s', $html, $m);
 
-        return implode("\n", $lines);
+        if ($m[0] === []) {
+            return $html;
+        }
+
+        $rows = $m[0];
+        sort($rows, SORT_STRING);
+
+        $index = 0;
+
+        return preg_replace_callback(
+            '#<tr class="(?:file|directory|parent)">.*?</tr>#s',
+            static function () use ($rows, &$index): string {
+                return $rows[$index++];
+            },
+            $html
+        );
     }
 
     private function assertMatchesGolden(string $name, string $actual): void
@@ -135,7 +153,7 @@ final class GoldenListingTest extends IndexerTestCase
         $response = Indexer::render($fixture);
 
         $this->assertSame('', $response->stderr);
-        $this->assertMatchesGolden('root-listing', $this->normalise($response->body));
+        $this->assertMatchesGolden('root-listing', $this->normalise($this->orderRows($response->body)));
     }
 
     public function testSubdirectoryListing(): void
@@ -149,7 +167,7 @@ final class GoldenListingTest extends IndexerTestCase
         $response = Indexer::render($fixture, '/albums/');
 
         $this->assertSame('', $response->stderr);
-        $this->assertMatchesGolden('subdirectory-listing', $this->normalise($response->body));
+        $this->assertMatchesGolden('subdirectory-listing', $this->normalise($this->orderRows($response->body)));
     }
 
     public function testEmptyDirectoryListing(): void
@@ -161,7 +179,7 @@ final class GoldenListingTest extends IndexerTestCase
         $response = Indexer::render($fixture, '/nothing/');
 
         $this->assertSame('', $response->stderr);
-        $this->assertMatchesGolden('empty-listing', $this->normalise($response->body));
+        $this->assertMatchesGolden('empty-listing', $this->normalise($this->orderRows($response->body)));
     }
 
     /**
@@ -188,6 +206,6 @@ final class GoldenListingTest extends IndexerTestCase
         $response = Indexer::render($fixture);
 
         $this->assertSame('', $response->stderr);
-        $this->assertMatchesGolden('hostile-names-rows', $this->normalise($this->sortRows($response->rows())));
+        $this->assertMatchesGolden('hostile-names-rows', $this->normalise($this->orderRows($response->rows())));
     }
 }
