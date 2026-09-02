@@ -83,6 +83,10 @@ PHP's built-in web server, so they read the nonce the server actually issued
 rather than reconstructing it. That also covers the response status codes, which
 the CLI does not emit. No extra binaries are needed.
 
+The suite itself needs PHP 8.2 or newer, because that is PHPUnit 11's floor.
+That is a constraint on the tooling, not on the script, which still runs on
+older versions.
+
 
 ## Staged TypeScript work
 

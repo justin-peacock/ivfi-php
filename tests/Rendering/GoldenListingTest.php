@@ -27,6 +27,26 @@ final class GoldenListingTest extends IndexerTestCase
      * A tree that covers each row type and each column, with names that are
      * ordinary enough to stay readable in the snapshot.
      */
+    /**
+     * Sorting is off by default, which leaves the order to the filesystem, and
+     * that differs between platforms. Turn the script's own sort on for these
+     * fixtures so a snapshot describes the renderer rather than the machine.
+     *
+     * SORT_ASC is written as its value because the config is exported to a
+     * file rather than evaluated here.
+     */
+    private function deterministicOrder(Fixture $fixture): void
+    {
+        $fixture->config([
+            'sorting' => [
+                'enabled' => true,
+                'sort_by' => 'name',
+                'order'   => 4,
+                'types'   => 0,
+            ],
+        ]);
+    }
+
     private function tree(Fixture $fixture): void
     {
         $fixture->directory('albums');
@@ -109,6 +129,7 @@ final class GoldenListingTest extends IndexerTestCase
     public function testRootListing(): void
     {
         $fixture = new Fixture('golden-root');
+        $this->deterministicOrder($fixture);
         $this->tree($fixture);
 
         $response = Indexer::render($fixture);
@@ -120,6 +141,7 @@ final class GoldenListingTest extends IndexerTestCase
     public function testSubdirectoryListing(): void
     {
         $fixture = new Fixture('golden-sub');
+        $this->deterministicOrder($fixture);
         $fixture->directory('albums');
         $fixture->file('albums/one.jpg', 'a');
         $fixture->file('albums/two.png', 'bb');
@@ -133,6 +155,7 @@ final class GoldenListingTest extends IndexerTestCase
     public function testEmptyDirectoryListing(): void
     {
         $fixture = new Fixture('golden-empty');
+        $this->deterministicOrder($fixture);
         $fixture->directory('nothing');
 
         $response = Indexer::render($fixture, '/nothing/');
@@ -149,6 +172,7 @@ final class GoldenListingTest extends IndexerTestCase
     public function testHostileNamesListing(): void
     {
         $fixture = new Fixture('golden-hostile');
+        $this->deterministicOrder($fixture);
 
         foreach ($this->asciiHostileNames() as $name) {
             $fixture->file($name . '.jpg');
