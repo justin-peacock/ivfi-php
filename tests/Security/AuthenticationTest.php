@@ -10,19 +10,17 @@ use Ivfi\Tests\Support\Response;
 use Ivfi\Tests\Support\Server;
 
 /**
- * Digest authentication compared the response with a loose, non constant time
- * `!=`, and issued nonces from `uniqid()` that were never checked when the
- * client sent them back.
+ * Session authentication, which replaced HTTP digest.
  *
- * These run through PHP's built-in server so the real challenge can be read
- * from the response headers, which means the exchange uses the server's own
- * nonce rather than one the test reconstructed.
+ * Digest fixed the hash to MD5, needed a password equivalent on disk, could
+ * not be signed out of, and re-authenticated on every request. These cover the
+ * replacement end to end through PHP's built-in server, so the exchange uses
+ * the real cookies and the real form token rather than reconstructed ones.
  */
 final class AuthenticationTest extends IndexerTestCase
 {
-    private const USER  = 'alice';
-    private const PASS  = 's3cret';
-    private const REALM = 'Restricted content.';
+    private const USER = 'emy';
+    private const PASS = 'correct horse battery staple';
 
     /** @var list<Server> */
     private array $servers = [];
@@ -36,189 +34,246 @@ final class AuthenticationTest extends IndexerTestCase
         $this->servers = [];
     }
 
-    private function serve(Fixture $fixture): Server
+    private function serve(?string $credential = null, array $extra = []): Server
     {
+        $fixture = new Fixture('session-auth');
+        $fixture->file('private.jpg');
+        $fixture->config([
+            'authentication' => array_merge([
+                'users' => [
+                    self::USER => $credential ?? password_hash(self::PASS, PASSWORD_DEFAULT),
+                ],
+                /* Kept inside the fixture so it is torn down with it */
+                'throttle_path' => $fixture->root(),
+            ], $extra),
+        ]);
+
         $server = new Server($fixture);
         $this->servers[] = $server;
 
         return $server;
     }
 
-    private function fixture(?string $credential = null): Fixture
+    private function token(Response $response): string
     {
-        $fixture = new Fixture('auth');
-        $fixture->file('secret.jpg');
-        $fixture->config([
-            'authentication' => [
-                'users' => [self::USER => $credential ?? self::PASS],
-            ],
-        ]);
+        preg_match('#name="ivfi_csrf" value="([^"]+)"#', $response->body, $m);
 
-        return $fixture;
-    }
-
-    /**
-     * Reads the nonce out of a fresh challenge.
-     */
-    private function challenge(Server $server): string
-    {
-        $response = $server->request('/');
-
-        $header = (string) $response->header('WWW-Authenticate');
-
-        $this->assertMatchesRegularExpression('/^Digest /', $header, 'no digest challenge issued');
-        $this->assertSame('401 Unauthorized', $response->header('Status'));
-
-        preg_match('/nonce="([^"]+)"/', $header, $m);
-
-        $this->assertNotEmpty($m[1] ?? '', 'challenge carried no nonce');
+        $this->assertNotEmpty($m[1] ?? '', 'the login form carried no token');
 
         return $m[1];
     }
 
-    private function authorize(
-        Server $server,
-        string $nonce,
-        string $password,
-        string $user = self::USER,
-        string $uri = '/'
-    ): Response {
-        $cnonce = 'testcnonce';
-        $nc     = '00000001';
+    private function signIn(Server $server, string $password): Response
+    {
+        $login = $server->request('/');
 
-        $a1 = md5($user . ':' . self::REALM . ':' . $password);
-        $a2 = md5('GET:' . $uri);
-
-        $response = md5("{$a1}:{$nonce}:{$nc}:{$cnonce}:auth:{$a2}");
-
-        return $server->request($uri, [
-            'Authorization' => sprintf(
-                'Digest username="%s", realm="%s", nonce="%s", uri="%s", qop=auth, nc=%s, cnonce="%s", response="%s"',
-                $user,
-                self::REALM,
-                $nonce,
-                $uri,
-                $nc,
-                $cnonce,
-                $response
-            ),
+        return $server->request('/', [], [
+            'ivfi_user' => self::USER,
+            'ivfi_pass' => $password,
+            'ivfi_csrf' => $this->token($login),
         ]);
     }
 
-    public function testUnauthenticatedRequestIsChallenged(): void
+    public function testUnauthenticatedRequestGetsTheLoginPage(): void
     {
-        $server = $this->serve($this->fixture());
+        $response = $this->serve()->request('/');
 
-        $this->challenge($server);
-    }
-
-    public function testCorrectPasswordIsAccepted(): void
-    {
-        $server = $this->serve($this->fixture());
-
-        $result = $this->authorize($server, $this->challenge($server), self::PASS);
-
-        $this->assertStringContainsString('secret.jpg', $result->body);
-        $this->assertStringNotContainsString('Invalid credentials', $result->body);
-    }
-
-    public function testWrongPasswordIsRejected(): void
-    {
-        $server = $this->serve($this->fixture());
-
-        $result = $this->authorize($server, $this->challenge($server), 'wrong');
-
-        $this->assertStringContainsString('Invalid credentials', $result->body);
-        $this->assertStringNotContainsString('secret.jpg', $result->body);
-    }
-
-    public function testUnknownUserIsRejected(): void
-    {
-        $server = $this->serve($this->fixture());
-
-        $result = $this->authorize(
-            $server, $this->challenge($server), self::PASS, 'mallory'
-        );
-
-        $this->assertStringContainsString('Invalid credentials', $result->body);
+        $this->assertSame('401 Unauthorized', $response->header('Status'));
+        $this->assertStringContainsString('name="ivfi_pass"', $response->body);
     }
 
     /**
-     * A credential may be stored as a precomputed HA1 so that a deployment
-     * does not have to keep the password in the clear.
+     * The point of the gate: nothing about the directory may leak alongside
+     * the login form.
      */
-    public function testPrecomputedHa1CredentialIsAccepted(): void
+    public function testLoginPageDoesNotLeakTheListing(): void
     {
-        $ha1 = md5(self::USER . ':' . self::REALM . ':' . self::PASS);
+        $response = $this->serve()->request('/');
 
-        $server = $this->serve($this->fixture('md5:' . $ha1));
-
-        $result = $this->authorize($server, $this->challenge($server), self::PASS);
-
-        $this->assertStringContainsString('secret.jpg', $result->body);
+        $this->assertStringNotContainsString('private.jpg', $response->body);
+        $this->assertStringNotContainsString('<tr class="file">', $response->body);
     }
 
-    public function testPrecomputedHa1CredentialStillRejectsWrongPassword(): void
+    public function testCorrectPasswordSignsIn(): void
     {
-        $ha1 = md5(self::USER . ':' . self::REALM . ':' . self::PASS);
+        $server = $this->serve();
 
-        $server = $this->serve($this->fixture('md5:' . $ha1));
+        $this->assertSame('302 Found', $this->signIn($server, self::PASS)->header('Status'));
 
-        $result = $this->authorize($server, $this->challenge($server), 'wrong');
+        $listing = $server->request('/');
 
-        $this->assertStringContainsString('Invalid credentials', $result->body);
+        $this->assertStringContainsString('private.jpg', $listing->body);
+    }
+
+    public function testWrongPasswordDoesNotSignIn(): void
+    {
+        $server = $this->serve();
+
+        $result = $this->signIn($server, 'wrong');
+
+        $this->assertStringContainsString('Incorrect username or password', $result->body);
+        $this->assertStringNotContainsString('private.jpg', $server->request('/')->body);
     }
 
     /**
-     * The nonce used to be `uniqid()` and was never validated, so a client
-     * could invent one. It must now be a challenge the server actually issued.
+     * An unknown user and a wrong password must be indistinguishable, or the
+     * form becomes a way to enumerate accounts.
      */
-    public function testInventedNonceIsRejected(): void
+    public function testUnknownUserAndWrongPasswordLookTheSame(): void
     {
-        $server = $this->serve($this->fixture());
+        $server = $this->serve();
 
-        $result = $this->authorize($server, uniqid(), self::PASS);
+        $wrongPassword = $this->signIn($server, 'wrong');
 
-        $this->assertStringContainsString('Invalid credentials', $result->body);
-        $this->assertStringNotContainsString('secret.jpg', $result->body);
+        $server->clearCookies();
+
+        $login = $server->request('/');
+        $unknownUser = $server->request('/', [], [
+            'ivfi_user' => 'nobody',
+            'ivfi_pass' => 'wrong',
+            'ivfi_csrf' => $this->token($login),
+        ]);
+
+        $this->assertStringContainsString('Incorrect username or password', $wrongPassword->body);
+        $this->assertStringContainsString('Incorrect username or password', $unknownUser->body);
+        $this->assertSame($wrongPassword->header('Status'), $unknownUser->header('Status'));
     }
 
-    public function testForgedNonceWithPlausibleShapeIsRejected(): void
+    public function testSessionCookieIsHttpOnlyAndSameSite(): void
     {
-        $server = $this->serve($this->fixture());
+        $attributes = $this->serve()->request('/')->cookieAttributes('IVFISESS');
 
-        $forged = time() . ':' . bin2hex(random_bytes(8)) . ':' . str_repeat('a', 64);
-
-        $result = $this->authorize($server, $forged, self::PASS);
-
-        $this->assertStringContainsString('Invalid credentials', $result->body);
-    }
-
-    /**
-     * Each challenge is distinct, so a captured one cannot simply be reused
-     * forever.
-     */
-    public function testEachChallengeIssuesADistinctNonce(): void
-    {
-        $server = $this->serve($this->fixture());
-
-        $this->assertNotSame(
-            $this->challenge($server),
-            $this->challenge($server),
-            'the same nonce was issued twice'
-        );
+        $this->assertContains('httponly', $attributes, 'the session cookie is readable by script');
+        $this->assertContains('samesite=lax', $attributes);
+        $this->assertContains('path=/', $attributes);
     }
 
     /**
-     * The status line was written without a space, producing the malformed
-     * `HTTP/1.1401 Unauthorized`.
+     * The identifier must change on sign-in, or one fixed beforehand stays
+     * valid afterwards.
      */
-    public function testChallengeSendsAWellFormedStatus(): void
+    public function testSessionIdentifierChangesOnSignIn(): void
     {
-        $server = $this->serve($this->fixture());
+        $server = $this->serve();
+
+        $before = $server->request('/')->setCookies()['IVFISESS'] ?? '';
+        $after = $this->signIn($server, self::PASS)->setCookies()['IVFISESS'] ?? '';
+
+        $this->assertNotSame('', $before);
+        $this->assertNotSame('', $after);
+        $this->assertNotSame($before, $after, 'the session identifier was reused');
+    }
+
+    public function testFormWithoutAValidTokenIsRejected(): void
+    {
+        $server = $this->serve();
+
+        $server->request('/');
+
+        $result = $server->request('/', [], [
+            'ivfi_user' => self::USER,
+            'ivfi_pass' => self::PASS,
+            'ivfi_csrf' => 'not-the-token',
+        ]);
+
+        $this->assertStringContainsString('session expired', $result->body);
+        $this->assertStringNotContainsString('private.jpg', $server->request('/')->body);
+    }
+
+    public function testSignOutEndsTheSession(): void
+    {
+        $server = $this->serve();
+
+        $this->signIn($server, self::PASS);
+
+        $listing = $server->request('/');
+
+        preg_match('#href="\?ivfi_logout=([^"]+)"#', $listing->body, $m);
+
+        $this->assertNotEmpty($m[1] ?? '', 'no sign-out link was rendered');
+
+        $server->request('/?ivfi_logout=' . $m[1]);
+
+        $after = $server->request('/');
+
+        $this->assertSame('401 Unauthorized', $after->header('Status'));
+        $this->assertStringNotContainsString('private.jpg', $after->body);
+    }
+
+    /**
+     * Signing out is a state change, so a link from somewhere else must not
+     * be able to do it.
+     */
+    public function testSignOutNeedsTheSessionToken(): void
+    {
+        $server = $this->serve();
+
+        $this->signIn($server, self::PASS);
+        $server->request('/?ivfi_logout=guessed');
+
+        $this->assertStringContainsString('private.jpg', $server->request('/')->body);
+    }
+
+    public function testRepeatedFailuresLockTheAddressOut(): void
+    {
+        $server = $this->serve();
+
+        for ($attempt = 0; $attempt < 5; $attempt++) {
+            $this->signIn($server, 'wrong');
+        }
+
+        $locked = $this->signIn($server, 'wrong');
+
+        $this->assertSame('429 Too Many Requests', $locked->header('Status'));
+        $this->assertStringContainsString('Too many attempts', $locked->body);
+    }
+
+    /**
+     * A lockout that the right password walks through is not a lockout.
+     */
+    public function testLockoutAlsoRefusesTheCorrectPassword(): void
+    {
+        $server = $this->serve();
+
+        for ($attempt = 0; $attempt < 5; $attempt++) {
+            $this->signIn($server, 'wrong');
+        }
+
+        $result = $this->signIn($server, self::PASS);
+
+        $this->assertSame('429 Too Many Requests', $result->header('Status'));
+        $this->assertStringNotContainsString('private.jpg', $server->request('/')->body);
+    }
+
+    /**
+     * A plaintext password in the config would work silently and leave the
+     * secret readable on disk, so it is refused instead.
+     */
+    public function testPlaintextCredentialIsRefused(): void
+    {
+        $server = $this->serve('just-a-plain-password');
 
         $response = $server->request('/');
 
-        $this->assertSame('401 Unauthorized', $response->header('Status'));
+        $this->assertSame('500 Internal Server Error', $response->header('Status'));
+        $this->assertStringContainsString('misconfigured', $response->body);
+
+        $result = $this->signIn($server, 'just-a-plain-password');
+
+        $this->assertStringNotContainsString('private.jpg', $result->body);
+    }
+
+    /**
+     * The `restrict` regex still decides which paths are gated at all.
+     */
+    public function testRestrictLeavesOtherPathsOpen(): void
+    {
+        $server = $this->serve(null, ['restrict' => '#^/locked#']);
+
+        $this->assertStringContainsString(
+            'private.jpg',
+            $server->request('/')->body,
+            'an unrestricted path asked for a login'
+        );
     }
 }

@@ -19,6 +19,18 @@ $version = '<%= version %>';
 $config = [
     /**
      * Authentication options
+     *
+     * Sign-in is by session cookie against a login form. Credentials are
+     * `password_hash()` values, never plaintext; generate one with:
+     *
+     *   php -r 'echo password_hash("your password", PASSWORD_DEFAULT), "\n";'
+     *
+     *   'authentication' => [
+     *     'users' => ['emy' => '$2y$12$...'],
+     *     'restrict' => '/^\/(private)\/?/i',  // optional, gate only these paths
+     *     'behind_proxy' => true,               // trust X-Forwarded-Proto for the Secure flag
+     *     'throttle_path' => '/var/lib/ivfi'    // where failed attempts are counted
+     *   ]
      */
     'authentication' => false,
     /**
@@ -575,196 +587,442 @@ class Helpers
   }
 }
 
-/** How long an issued digest challenge stays valid, in seconds */
-define('AUTH_NONCE_LIFETIME', 300);
+/** Name of the session cookie */
+define('AUTH_SESSION_NAME', 'IVFISESS');
+/** Failed attempts from one address before it is locked out */
+define('AUTH_MAX_ATTEMPTS', 5);
+/** How long a lockout lasts, in seconds */
+define('AUTH_LOCKOUT_SECONDS', 900);
+/** How long a session may sit idle before it stops being accepted, in seconds */
+define('AUTH_IDLE_TIMEOUT', 43200);
+/** Field names used by the login form */
+define('AUTH_FIELD_USER', 'ivfi_user');
+define('AUTH_FIELD_PASS', 'ivfi_pass');
+define('AUTH_FIELD_CSRF', 'ivfi_csrf');
+/** Query parameter that signs the client out */
+define('AUTH_PARAM_LOGOUT', 'ivfi_logout');
 
 /**
- * Parses an HTTP digest header into its components
+ * Whether the request reached us over HTTPS
  *
- * @param String  $text   The raw `PHP_AUTH_DIGEST` value
+ * Used to decide whether the session cookie carries the `Secure` flag, so
+ * getting it wrong either leaks the cookie over plaintext or makes login
+ * silently impossible.
  *
- * @return Array|Boolean
- */
-function httpDigestParse($text)
-{
-  /* Protect against missing data */
-  $neededParts = [
-    'nonce' => 1,
-    'nc' => 1,
-    'cnonce' => 1,
-    'qop' => 1,
-    'username' => 1,
-    'uri' => 1,
-    'response' => 1
-  ];
-
-  $data = [];
-  $keys = implode('|', array_keys($neededParts));
-
-  /**
-   * The quoted branch was `([^\2]+?)`, which reads as a backreference but is
-   * really the octal escape for chr(2), so it behaved as "any character" and
-   * parsed correctly by accident. Spelled as a lazy `.` it says what it means.
-   */
-  preg_match_all(
-    '@(' . $keys . ')=(?:([\'"])(.*?)\2|([^\s,]+))@', $text, $matches, PREG_SET_ORDER
-  );
-
-  foreach($matches as $m)
-  {
-    /**
-     * Checked rather than truthy: a legitimate value of "0" would otherwise
-     * fall through to the unquoted group, which is unset on this branch
-     */
-    $data[$m[1]] = (isset($m[3]) && $m[3] !== '') ? $m[3] : $m[4];
-    unset($neededParts[$m[1]]);
-  }
-
-  return $neededParts ? false : $data;
-}
-
-/**
- * Derives the key used to sign digest nonces
- *
- * The credentials are already the shared secret between the server and the
- * client, so deriving the signing key from them keeps this configuration free
- * while giving an attacker nothing they would not already need to know.
- *
- * @param Array    $users   An array of users and their password
- * @param String   $realm   Authentication realm
- *
- * @return String
- */
-function authNonceKey($users, $realm)
-{
-  return hash('sha256', serialize($users) . '|' . $realm);
-}
-
-/**
- * Creates a signed, timestamped nonce
- *
- * @param Array    $users   An array of users and their password
- * @param String   $realm   Authentication realm
- *
- * @return String
- */
-function authCreateNonce($users, $realm)
-{
-  $payload = time() . ':' . bin2hex(random_bytes(8));
-
-  return $payload . ':' . hash_hmac(
-    'sha256', $payload, authNonceKey($users, $realm)
-  );
-}
-
-/**
- * Verifies that a nonce was issued by this script and has not expired
- *
- * @param String   $nonce   The nonce returned by the client
- * @param Array    $users   An array of users and their password
- * @param String   $realm   Authentication realm
+ * @param Boolean  $trustProxy  Whether a forwarding proxy sits in front
  *
  * @return Boolean
  */
-function authVerifyNonce($nonce, $users, $realm)
+function authIsSecureRequest($trustProxy)
 {
-  $parts = explode(':', (string) $nonce);
-
-  if(count($parts) !== 3)
+  if(!empty($_SERVER['HTTPS']) && strtolower($_SERVER['HTTPS']) !== 'off')
   {
-    return false;
+    return true;
   }
 
-  $expected = hash_hmac(
-    'sha256', $parts[0] . ':' . $parts[1], authNonceKey($users, $realm)
-  );
-
-  if(!hash_equals($expected, $parts[2]))
+  if(!empty($_SERVER['SERVER_PORT']) && (int) $_SERVER['SERVER_PORT'] === 443)
   {
-    return false;
+    return true;
   }
 
-  /* Reject stale and future dated challenges */
-  $age = (time() - (int) $parts[0]);
+  /**
+   * Only believe the forwarded header when the operator has said a proxy is
+   * in front. Any client can send it, so trusting it unconditionally would
+   * let a visitor decide whether their own cookie is protected
+   */
+  if($trustProxy && isset($_SERVER['HTTP_X_FORWARDED_PROTO']))
+  {
+    return strtolower($_SERVER['HTTP_X_FORWARDED_PROTO']) === 'https';
+  }
 
-  return ($age >= 0 && $age <= AUTH_NONCE_LIFETIME);
+  return false;
 }
 
-  /**
-   * Authenticaticates a user
-   *
-   * @param Array    $users   An array of users and their password
-   * @param String   $realm   Authenication realm
-   *
-   * @return Void
-   */
-function authenticate($users, $realm)
+/**
+ * Path of the file that records failed attempts
+ *
+ * @param Array  $options  Authentication options
+ *
+ * @return String
+ */
+function authThrottlePath($options)
 {
-  /* Create header for when unathorized */
-  $createHeader = function() use ($users, $realm)
-  {
-    /* Note the space: the original produced `HTTP/1.1401 Unauthorized` */
-    header($_SERVER['SERVER_PROTOCOL'] . ' 401 Unauthorized');
+  $dir = (isset($options['throttle_path']) && $options['throttle_path'])
+    ? $options['throttle_path']
+    : sys_get_temp_dir();
 
-    header(sprintf(
-      'WWW-Authenticate: Digest realm="%s",qop="auth",nonce="%s",opaque="%s"',
-      $realm, authCreateNonce($users, $realm), hash('sha256', $realm)
+  return rtrim($dir, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'ivfi-auth.json';
+}
+
+/**
+ * Identifies an attempt without storing who made it
+ *
+ * @param String  $username  The attempted username
+ *
+ * @return String
+ */
+function authThrottleKey($username)
+{
+  $address = isset($_SERVER['REMOTE_ADDR']) ? $_SERVER['REMOTE_ADDR'] : '-';
+
+  return hash('sha256', strtolower($username) . '|' . $address);
+}
+
+/**
+ * Reads, updates and prunes the failed attempt record
+ *
+ * Kept in one function so the file is opened, locked, changed and closed in a
+ * single place. Attempts are tracked server-side because anything held in the
+ * session would be discarded by the client along with the cookie.
+ *
+ * @param Array   $options   Authentication options
+ * @param String  $username  The attempted username
+ * @param String  $action    One of 'check', 'fail' or 'clear'
+ *
+ * @return Integer  Seconds remaining on a lockout, or 0
+ */
+function authThrottle($options, $username, $action)
+{
+  $path = authThrottlePath($options);
+  $key = authThrottleKey($username);
+  $now = time();
+
+  $handle = @fopen($path, 'c+');
+
+  if($handle === false)
+  {
+    /**
+     * Without somewhere to record attempts there is no throttling. Say so
+     * rather than failing the request, but make it visible: an unthrottled
+     * login is a real weakening and should not pass unnoticed
+     */
+    error_log(sprintf(
+      'IVFi: cannot write the login throttle file at %s, attempts are not being limited', $path
     ));
-  };
 
-  /* Deny access if no digest is set */
-  if(empty($_SERVER['PHP_AUTH_DIGEST']))
-  {
-    $createHeader();
-    die('401 Unauthorized');
+    return 0;
   }
 
-  /* Get digest data */
-  $data = httpDigestParse($_SERVER['PHP_AUTH_DIGEST']);
+  flock($handle, LOCK_EX);
 
-  /* Deny access if data is invalid or username is unset */
-  if(!$data || !isset($users[$data['username']]))
+  $size = filesize($path);
+  $raw = $size > 0 ? fread($handle, $size) : '';
+  $records = json_decode((string) $raw, true);
+
+  if(!is_array($records))
   {
-    $createHeader();
-    die('Invalid credentials.');
+    $records = [];
+  }
+
+  /* Drop anything old enough to no longer matter */
+  foreach($records as $recorded => $entry)
+  {
+    if(!isset($entry['seen']) || ($now - $entry['seen']) > AUTH_LOCKOUT_SECONDS)
+    {
+      unset($records[$recorded]);
+    }
+  }
+
+  $remaining = 0;
+
+  if($action === 'clear')
+  {
+    unset($records[$key]);
+  } else {
+    $count = isset($records[$key]['count']) ? (int) $records[$key]['count'] : 0;
+    $seen = isset($records[$key]['seen']) ? (int) $records[$key]['seen'] : $now;
+
+    if($action === 'fail')
+    {
+      $count++;
+      $seen = $now;
+
+      $records[$key] = ['count' => $count, 'seen' => $seen];
+    }
+
+    if($count >= AUTH_MAX_ATTEMPTS)
+    {
+      $remaining = max(0, (AUTH_LOCKOUT_SECONDS - ($now - $seen)));
+    }
+  }
+
+  ftruncate($handle, 0);
+  rewind($handle);
+  fwrite($handle, json_encode($records));
+  fflush($handle);
+  flock($handle, LOCK_UN);
+  fclose($handle);
+
+  return $remaining;
+}
+
+/**
+ * Renders the login page and stops
+ *
+ * Self contained rather than styled by the built stylesheet, because it is
+ * shown before anything about the listing is known and should not depend on
+ * assets that a misconfigured path could fail to serve.
+ *
+ * @param String   $error   Message to show, if any
+ * @param Integer  $status  HTTP status to send
+ *
+ * @return Void
+ */
+function authRenderLogin($error = '', $status = 401)
+{
+  http_response_code($status);
+
+  header('Cache-Control: no-store');
+  header('Content-Type: text/html; charset=utf-8');
+
+  /* Bound to the session so a form from elsewhere cannot post here */
+  if(empty($_SESSION['csrf']))
+  {
+    $_SESSION['csrf'] = bin2hex(random_bytes(32));
+  }
+
+  $csrf = Helpers::escape($_SESSION['csrf']);
+  $userField = AUTH_FIELD_USER;
+  $passField = AUTH_FIELD_PASS;
+  $csrfField = AUTH_FIELD_CSRF;
+  $message = $error === ''
+    ? ''
+    : ('<p class="error">' . Helpers::escape($error) . '</p>');
+
+  echo <<<HTML
+<!DOCTYPE HTML>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="robots" content="noindex, nofollow">
+    <title>Sign in</title>
+    <style>
+      :root { color-scheme: dark; }
+      body {
+        margin: 0; min-height: 100vh; display: flex;
+        align-items: center; justify-content: center;
+        background: #1a1c20; color: #d8dade;
+        font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      }
+      form {
+        width: 100%; max-width: 320px; padding: 28px;
+        background: #23262b; border: 1px solid #32363d; border-radius: 4px;
+        display: flex; flex-direction: column; gap: 14px;
+      }
+      h1 { margin: 0 0 4px; font-size: 17px; font-weight: 600; }
+      label { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: #9aa0a8; }
+      input[type=text], input[type=password] {
+        padding: 9px 10px; font-size: 14px; color: #e8eaed;
+        background: #1a1c20; border: 1px solid #3a3f47; border-radius: 3px;
+      }
+      input:focus-visible { outline: 2px solid #5b8dd6; outline-offset: 1px; }
+      button {
+        padding: 9px 10px; font-size: 14px; font-weight: 500; cursor: pointer;
+        color: #fff; background: #3f6ba8; border: 0; border-radius: 3px;
+      }
+      button:hover { background: #4a7aba; }
+      .error {
+        margin: 0; padding: 8px 10px; font-size: 13px;
+        color: #f0b3ad; background: #3a2320; border: 1px solid #5c332e; border-radius: 3px;
+      }
+    </style>
+  </head>
+  <body>
+    <form method="post" autocomplete="on">
+      <h1>Sign in</h1>
+      {$message}
+      <label>Username
+        <input type="text" name="{$userField}" autocomplete="username" autofocus required>
+      </label>
+      <label>Password
+        <input type="password" name="{$passField}" autocomplete="current-password" required>
+      </label>
+      <input type="hidden" name="{$csrfField}" value="{$csrf}">
+      <button type="submit">Sign in</button>
+    </form>
+  </body>
+</html>
+HTML;
+
+  exit;
+}
+
+/**
+ * Confirms every configured credential is a password hash
+ *
+ * Storing a plaintext password would work silently and leave the secret
+ * readable on disk, so it is refused rather than accepted.
+ *
+ * @param Array  $users  Username to hash map
+ *
+ * @return Boolean
+ */
+function authCredentialsAreHashed($users)
+{
+  foreach($users as $credential)
+  {
+    if(!is_string($credential))
+    {
+      return false;
+    }
+
+    $info = password_get_info($credential);
+
+    if(empty($info['algo']))
+    {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+/**
+ * Requires a signed-in session, or presents the login page
+ *
+ * Replaces the previous HTTP digest scheme, which fixed the hash to MD5,
+ * needed a password equivalent on disk, offered no way to sign out and
+ * re-authenticated on every request.
+ *
+ * @param Array   $users    Username to password hash map
+ * @param String  $realm    Unused, kept so the call sites read the same
+ * @param Array   $options  Authentication options
+ *
+ * @return Void
+ */
+function authenticate($users, $realm, $options = [])
+{
+  $trustProxy = !empty($options['behind_proxy']);
+
+  /* Configure the cookie before the session starts, or the flags do not apply */
+  $params = [
+    'lifetime' => 0,
+    'path' => '/',
+    'domain' => '',
+    'secure' => authIsSecureRequest($trustProxy),
+    'httponly' => true,
+    'samesite' => 'Lax'
+  ];
+
+  if(PHP_VERSION_ID >= 70300)
+  {
+    session_set_cookie_params($params);
+  } else {
+    session_set_cookie_params(
+      $params['lifetime'], $params['path'] . '; samesite=' . $params['samesite'],
+      $params['domain'], $params['secure'], $params['httponly']
+    );
+  }
+
+  session_name(AUTH_SESSION_NAME);
+
+  if(session_status() !== PHP_SESSION_ACTIVE)
+  {
+    session_start();
+  }
+
+  /* Signing out is a state change, so it carries the same token as the form */
+  if(isset($_GET[AUTH_PARAM_LOGOUT]))
+  {
+    if(isset($_SESSION['csrf'])
+      && hash_equals($_SESSION['csrf'], (string) $_GET[AUTH_PARAM_LOGOUT]))
+    {
+      $_SESSION = [];
+      session_destroy();
+    }
+
+    header('Location: ' . strtok((string) $_SERVER['REQUEST_URI'], '?'));
+
+    exit;
+  }
+
+  if(!is_array($users) || $users === [])
+  {
+    error_log('IVFi: authentication is enabled but no users are configured');
+
+    authRenderLogin('Authentication is misconfigured.', 500);
+  }
+
+  if(!authCredentialsAreHashed($users))
+  {
+    error_log(
+      'IVFi: authentication credentials must be password_hash() values. ' .
+      'Generate one with: php -r \'echo password_hash("your password", PASSWORD_DEFAULT), "\n";\''
+    );
+
+    authRenderLogin('Authentication is misconfigured.', 500);
+  }
+
+  /* Already signed in? */
+  if(isset($_SESSION['user'], $_SESSION['seen'])
+    && isset($users[$_SESSION['user']])
+    && (time() - (int) $_SESSION['seen']) < AUTH_IDLE_TIMEOUT)
+  {
+    $_SESSION['seen'] = time();
+
+    return;
+  }
+
+  /* An expired or unrecognised session should not linger */
+  if(isset($_SESSION['user']))
+  {
+    unset($_SESSION['user'], $_SESSION['seen']);
+  }
+
+  if(($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST')
+  {
+    authRenderLogin();
+  }
+
+  $username = isset($_POST[AUTH_FIELD_USER]) ? (string) $_POST[AUTH_FIELD_USER] : '';
+  $password = isset($_POST[AUTH_FIELD_PASS]) ? (string) $_POST[AUTH_FIELD_PASS] : '';
+  $token = isset($_POST[AUTH_FIELD_CSRF]) ? (string) $_POST[AUTH_FIELD_CSRF] : '';
+
+  if(empty($_SESSION['csrf']) || !hash_equals($_SESSION['csrf'], $token))
+  {
+    authRenderLogin('Your session expired. Please try again.');
+  }
+
+  $locked = authThrottle($options, $username, 'check');
+
+  if($locked > 0)
+  {
+    authRenderLogin(sprintf(
+      'Too many attempts. Try again in %d minutes.', (int) ceil($locked / 60)
+    ), 429);
   }
 
   /**
-   * Reject any challenge this script did not issue, or that has expired.
-   * The nonce was previously `uniqid()`, which is derived from the clock and
-   * was never checked on the way back in
+   * Verify against a dummy hash when the user is unknown, so that a missing
+   * account takes the same time as a wrong password and cannot be told apart
    */
-  if(!authVerifyNonce($data['nonce'], $users, $realm))
+  $known = isset($users[$username]);
+  $hash = $known
+    ? $users[$username]
+    : '$2y$12$usesomesillystringfortestingpvHrJk3G6.Ll5Qm6Tx0RGa4jXe2Wm';
+
+  if(!password_verify($password, $hash) || !$known)
   {
-    $createHeader();
-    die('Invalid credentials.');
+    authThrottle($options, $username, 'fail');
+
+    /* One message for both cases, so it reveals nothing about which failed */
+    authRenderLogin('Incorrect username or password.');
   }
 
-  $credential = $users[$data['username']];
+  authThrottle($options, $username, 'clear');
 
-  /**
-   * A credential may be given as a plaintext password, or as a precomputed
-   * HA1 prefixed with `md5:` so that a deployment does not have to store
-   * passwords in the clear. The prefix is explicit so that a password which
-   * happens to look like a hash is never mistaken for one
-   */
-  $a1 = strncmp($credential, 'md5:', 4) === 0
-    ? strtolower(substr($credential, 4))
-    : md5($data['username'] . ':' . $realm . ':' . $credential);
+  /* A new identifier on login, so a fixed one cannot be reused */
+  session_regenerate_id(true);
 
-  $a2 = md5($_SERVER['REQUEST_METHOD'] . ':' . $data['uri']);
+  $_SESSION['user'] = $username;
+  $_SESSION['seen'] = time();
+  $_SESSION['csrf'] = bin2hex(random_bytes(32));
 
-  $validResponse = md5(
-    $a1 . ':' . $data['nonce'] . ':' . $data['nc'] . ':' .
-    $data['cnonce'] . ':' . $data['qop'] . ':' . $a2
-  );
+  /* Redirect so a refresh does not repost the form */
+  header('Location: ' . (string) $_SERVER['REQUEST_URI']);
 
-  /* Deny access if data can't be verified, comparing in constant time */
-  if(!hash_equals($validResponse, (string) $data['response']))
-  {
-    $createHeader();
-    die('Invalid credentials.');
-  }
+  exit;
 }
 
 /**
@@ -867,11 +1125,15 @@ if(isset($config['authentication'])
     /* Restrict content if `restrict` filter matches successfully or it is unset */
     if($isRestricted)
     {
-      authenticate($config['authentication']['users'], 'Restricted content.');
+      authenticate(
+        $config['authentication']['users'],
+        'Restricted content.',
+        $config['authentication']
+      );
     }
   } else {
     /* Don't use any potential `users` array to authenticate, use main array instead */
-    authenticate($config['authentication'], 'Restricted content.');
+    authenticate($config['authentication'], 'Restricted content.', []);
   }
 }
 
@@ -2565,6 +2827,34 @@ function constructServerNameNotice()
  * 
  * @return String
  */ 
+/**
+ * Shows who is signed in, and offers a way to stop being signed in
+ *
+ * Without this the session could be created but never deliberately ended,
+ * which is one of the things HTTP digest could not do either.
+ *
+ * @return String
+ */
+function constructSessionNotice()
+{
+  if(!isset($_SESSION['user'], $_SESSION['csrf']))
+  {
+    return '';
+  }
+
+  return Helpers::createElement('div', [
+    'class' => 'sessionInfo'
+  ], sprintf(
+    'Signed in as %s%s',
+    Helpers::createElement('span', [], $_SESSION['user']),
+    Helpers::createElement('a', [
+      /* Carries the session token, so a link from elsewhere cannot sign you out */
+      'href' => sprintf('?%s=%s', AUTH_PARAM_LOGOUT, rawurlencode($_SESSION['csrf'])),
+      'class' => 'signOut'
+    ], 'Sign out')
+  ), true);
+}
+
 function constructFooter($renderTime, $currentDirectory, $config, $version)
 {
   $footerHtml = [
@@ -2593,6 +2883,8 @@ function constructFooter($renderTime, $currentDirectory, $config, $version)
       Helpers::createElement('span', [], $version)
     ]), true);
   }
+
+  $footerHtml[] = constructSessionNotice();
 
   return sprintf(
     '<div class="bottom">%s</div>', implode('', $footerHtml)

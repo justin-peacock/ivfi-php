@@ -25,6 +25,9 @@ final class Server
 
     private string $router;
 
+    /** @var array<string, string> */
+    private array $cookies = [];
+
     public function __construct(private Fixture $fixture)
     {
         $this->port = self::freePort();
@@ -95,21 +98,51 @@ PHP);
     /**
      * @param array<string, string> $headers
      */
-    public function request(string $uri, array $headers = []): Response
-    {
+    /**
+     * @param array<string, string> $headers
+     * @param array<string, string>|null $post Form fields, which make it a POST
+     */
+    public function request(
+        string $uri,
+        array $headers = [],
+        ?array $post = null
+    ): Response {
         $socket = @fsockopen('127.0.0.1', $this->port, $errno, $errstr, 5);
 
         if ($socket === false) {
             throw new \RuntimeException("Could not connect to the server: {$errstr}");
         }
 
-        $request = sprintf("GET %s HTTP/1.0\r\nHost: 127.0.0.1:%d\r\n", $uri, $this->port);
+        $body = $post === null ? '' : http_build_query($post);
+
+        $request = sprintf(
+            "%s %s HTTP/1.0\r\nHost: 127.0.0.1:%d\r\n",
+            $post === null ? 'GET' : 'POST',
+            $uri,
+            $this->port
+        );
+
+        if ($post !== null) {
+            $request .= "Content-Type: application/x-www-form-urlencoded\r\n";
+            $request .= sprintf("Content-Length: %d\r\n", strlen($body));
+        }
+
+        /* Anything the jar is holding, unless the caller set its own */
+        if ($this->cookies !== [] && !isset($headers['Cookie'])) {
+            $pairs = [];
+
+            foreach ($this->cookies as $name => $value) {
+                $pairs[] = $name . '=' . $value;
+            }
+
+            $request .= 'Cookie: ' . implode('; ', $pairs) . "\r\n";
+        }
 
         foreach ($headers as $name => $value) {
             $request .= sprintf("%s: %s\r\n", $name, $value);
         }
 
-        fwrite($socket, $request . "\r\n");
+        fwrite($socket, $request . "\r\n" . $body);
 
         $raw = '';
 
@@ -124,7 +157,28 @@ PHP);
             '#^HTTP/1\.[01] (\d{3} [^\r\n]*)#', 'Status: $1', $raw, 1
         );
 
-        return new Response((string) $raw, '', 0, true);
+        $response = new Response((string) $raw, '', 0, true);
+
+        /* Keep the session across calls, the way a browser would */
+        foreach ($response->setCookies() as $name => $value) {
+            if ($value === '' || $value === 'deleted') {
+                unset($this->cookies[$name]);
+
+                continue;
+            }
+
+            $this->cookies[$name] = $value;
+        }
+
+        return $response;
+    }
+
+    /**
+     * Forgets the stored cookies, standing in for a fresh browser.
+     */
+    public function clearCookies(): void
+    {
+        $this->cookies = [];
     }
 
     private function waitUntilReady(): void

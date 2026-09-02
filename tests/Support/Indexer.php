@@ -88,6 +88,9 @@ final class Response
     /** @var array<string, string> */
     public readonly array $headers;
 
+    /** @var list<string> Header lines as sent, so repeats are not lost */
+    public readonly array $rawHeaderLines;
+
     public function __construct(
         string $output,
         public readonly string $stderr,
@@ -97,6 +100,7 @@ final class Response
         if (!$hasHeaders) {
             $this->body = $output;
             $this->headers = [];
+            $this->rawHeaderLines = [];
 
             return;
         }
@@ -114,11 +118,65 @@ final class Response
 
         $this->body = $split[1] ?? '';
         $this->headers = $headers;
+        $this->rawHeaderLines = preg_split("/\r?\n/", $split[0] ?? '') ?: [];
     }
 
     public function header(string $name): ?string
     {
         return $this->headers[strtolower($name)] ?? null;
+    }
+
+    /**
+     * Cookies the response set, by name.
+     *
+     * Parsed from the raw header rather than the folded map, because a
+     * response can legitimately carry more than one Set-Cookie.
+     *
+     * @return array<string, string>
+     */
+    public function setCookies(): array
+    {
+        $cookies = [];
+
+        foreach ($this->rawHeaderLines as $line) {
+            if (stripos($line, 'set-cookie:') !== 0) {
+                continue;
+            }
+
+            $pair = trim(explode(';', substr($line, 11), 2)[0]);
+
+            if (str_contains($pair, '=')) {
+                [$name, $value] = explode('=', $pair, 2);
+                $cookies[trim($name)] = trim($value);
+            }
+        }
+
+        return $cookies;
+    }
+
+    /**
+     * The attributes on a named Set-Cookie, lowercased.
+     *
+     * @return list<string>
+     */
+    public function cookieAttributes(string $name): array
+    {
+        foreach ($this->rawHeaderLines as $line) {
+            if (stripos($line, 'set-cookie:') !== 0) {
+                continue;
+            }
+
+            $parts = explode(';', substr($line, 11));
+
+            if (strpos(trim($parts[0]), $name . '=') === 0) {
+                return array_map(
+                    static fn (string $p): string => strtolower(trim($p)),
+                    array_slice($parts, 1)
+                );
+            }
+        }
+
+        return [];
     }
 
     /**
