@@ -603,17 +603,39 @@ define('AUTH_FIELD_CSRF', 'ivfi_csrf');
 define('AUTH_PARAM_LOGOUT', 'ivfi_logout');
 
 /**
+ * The first value of a possibly chained forwarding header
+ *
+ * Two proxies in a row produce a comma separated list such as
+ * `https, http`, where the leftmost entry is what the original client used.
+ *
+ * @param String  $name  The $_SERVER key to read
+ *
+ * @return String
+ */
+function authForwardedValue($name)
+{
+  if(!isset($_SERVER[$name]))
+  {
+    return '';
+  }
+
+  $parts = explode(',', (string) $_SERVER[$name]);
+
+  return trim($parts[0]);
+}
+
+/**
  * Whether the request reached us over HTTPS
  *
  * Used to decide whether the session cookie carries the `Secure` flag, so
  * getting it wrong either leaks the cookie over plaintext or makes login
  * silently impossible.
  *
- * @param Boolean  $trustProxy  Whether a forwarding proxy sits in front
+ * @param Array  $options  Authentication options
  *
  * @return Boolean
  */
-function authIsSecureRequest($trustProxy)
+function authIsSecureRequest($options)
 {
   if(!empty($_SERVER['HTTPS']) && strtolower($_SERVER['HTTPS']) !== 'off')
   {
@@ -630,14 +652,49 @@ function authIsSecureRequest($trustProxy)
    * in front. Any client can send it, so trusting it unconditionally would
    * let a visitor decide whether their own cookie is protected
    */
-  if($trustProxy && isset($_SERVER['HTTP_X_FORWARDED_PROTO']))
+  if(!empty($options['behind_proxy']))
   {
-    return strtolower($_SERVER['HTTP_X_FORWARDED_PROTO']) === 'https';
+    return strtolower(authForwardedValue('HTTP_X_FORWARDED_PROTO')) === 'https';
   }
 
   return false;
 }
 
+/**
+ * The address the request came from
+ *
+ * Behind a proxy `REMOTE_ADDR` is the proxy, identical for every visitor, so
+ * a counter keyed on it would treat the whole internet as one client: five
+ * bad attempts from anybody would lock out everybody. The forwarded address
+ * is only read when the operator has said a proxy is in front, and is only
+ * trustworthy because such a proxy overwrites whatever the client sent.
+ *
+ * @param Array  $options  Authentication options
+ *
+ * @return String
+ */
+function authClientAddress($options)
+{
+  $fallback = isset($_SERVER['REMOTE_ADDR']) ? (string) $_SERVER['REMOTE_ADDR'] : '-';
+
+  if(empty($options['behind_proxy']))
+  {
+    return $fallback;
+  }
+
+  /**
+   * Cloudflare and most proxies disagree on the header name, so it is
+   * configurable. `CF-Connecting-IP` is the right choice behind Cloudflare
+   */
+  $header = (isset($options['client_ip_header']) && $options['client_ip_header'])
+    ? $options['client_ip_header']
+    : 'X-Forwarded-For';
+
+  $key = 'HTTP_' . strtoupper(str_replace('-', '_', $header));
+  $address = authForwardedValue($key);
+
+  return $address !== '' ? $address : $fallback;
+}
 /**
  * Path of the file that records failed attempts
  *
@@ -651,7 +708,17 @@ function authThrottlePath($options)
     ? $options['throttle_path']
     : sys_get_temp_dir();
 
-  return rtrim($dir, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'ivfi-auth.json';
+  /**
+   * The name is derived from this installation rather than fixed. A fixed
+   * name in a shared temp directory can be created in advance by any other
+   * local user, mode 000, after which the counter can never be opened and
+   * throttling is silently off for good. It also stops two installations on
+   * one host from overwriting each other
+   */
+  $identity = substr(hash('sha256', __FILE__), 0, 16);
+
+  return rtrim($dir, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR
+    . sprintf('ivfi-auth-%s.json', $identity);
 }
 
 /**
@@ -661,13 +728,13 @@ function authThrottlePath($options)
  * one address try a common password against a list of names without ever
  * tripping a lockout, since each name would carry its own count.
  *
+ * @param Array  $options  Authentication options
+ *
  * @return String
  */
-function authThrottleKey()
+function authThrottleKey($options)
 {
-  $address = isset($_SERVER['REMOTE_ADDR']) ? $_SERVER['REMOTE_ADDR'] : '-';
-
-  return hash('sha256', $address);
+  return hash('sha256', authClientAddress($options));
 }
 
 /**
@@ -685,9 +752,10 @@ function authThrottleKey()
 function authThrottle($options, $action)
 {
   $path = authThrottlePath($options);
-  $key = authThrottleKey();
+  $key = authThrottleKey($options);
   $now = time();
 
+  $existed = file_exists($path);
   $handle = @fopen($path, 'c+');
 
   if($handle === false)
@@ -697,11 +765,24 @@ function authThrottle($options, $action)
      * rather than failing the request, but make it visible: an unthrottled
      * login is a real weakening and should not pass unnoticed
      */
-    error_log(sprintf(
-      'IVFi: cannot write the login throttle file at %s, attempts are not being limited', $path
-    ));
+    static $warned = false;
+
+    if(!$warned)
+    {
+      $warned = true;
+
+      error_log(sprintf(
+        'IVFi: cannot write the login throttle file at %s, attempts are not being limited', $path
+      ));
+    }
 
     return 0;
+  }
+
+  /* Counts are nobody else's business, and the file is often in a shared directory */
+  if(!$existed)
+  {
+    @chmod($path, 0600);
   }
 
   flock($handle, LOCK_EX);
@@ -901,17 +982,34 @@ HTML;
  */
 function authCredentialsAreHashed($users)
 {
-  foreach($users as $credential)
+  /** Option keys that belong beside `users`, not inside it */
+  $options = [
+    'restrict' => 1, 'behind_proxy' => 1, 'throttle_path' => 1, 'client_ip_header' => 1
+  ];
+
+  foreach($users as $name => $credential)
   {
-    if(!is_string($credential))
+    /**
+     * With the flat form the option keys sit in the same array, so say which
+     * key is wrong rather than reporting a password hash problem that points
+     * nowhere near the actual mistake
+     */
+    if(isset($options[$name]))
     {
+      error_log(sprintf(
+        'IVFi: \'%s\' is an authentication option, not a user. Move the ' .
+        'credentials under a \'users\' key so the options sit beside them.', $name
+      ));
+
       return false;
     }
 
-    $info = password_get_info($credential);
-
-    if(empty($info['algo']))
+    if(!is_string($credential) || empty(password_get_info($credential)['algo']))
     {
+      error_log(sprintf(
+        'IVFi: the credential for \'%s\' is not a password_hash() value.', $name
+      ));
+
       return false;
     }
   }
@@ -936,38 +1034,51 @@ function authenticate($users, $realm, $options = [])
 {
   $trustProxy = !empty($options['behind_proxy']);
 
-  /* Configure the cookie before the session starts, or the flags do not apply */
-  $params = [
-    'lifetime' => 0,
-    'path' => '/',
-    'domain' => '',
-    'secure' => authIsSecureRequest($trustProxy),
-    'httponly' => true,
-    'samesite' => 'Lax'
-  ];
-
-  if(PHP_VERSION_ID >= 70300)
+  /**
+   * Close any session that was already running before taking over.
+   *
+   * `session_set_cookie_params()` and `session_name()` only work before a
+   * session exists. Called while one is active (session.auto_start, or an
+   * earlier session_start) they warn and return false, and the cookie keeps
+   * PHP's defaults: no HttpOnly, no SameSite, no Secure, and the wrong name.
+   * Skipping them in that case would avoid the warning but leave every
+   * protection here switched off, so close it and start our own instead
+   */
+  if(session_status() === PHP_SESSION_ACTIVE)
   {
-    session_set_cookie_params($params);
-  } else {
-    session_set_cookie_params(
-      $params['lifetime'], $params['path'] . '; samesite=' . $params['samesite'],
-      $params['domain'], $params['secure'], $params['httponly']
-    );
+    session_write_close();
   }
-
-  session_name(AUTH_SESSION_NAME);
 
   if(session_status() !== PHP_SESSION_ACTIVE)
   {
+    $params = [
+      'lifetime' => 0,
+      'path' => '/',
+      'domain' => '',
+      'secure' => authIsSecureRequest($options),
+      'httponly' => true,
+      'samesite' => 'Lax'
+    ];
+
+    if(PHP_VERSION_ID >= 70300)
+    {
+      session_set_cookie_params($params);
+    } else {
+      session_set_cookie_params(
+        $params['lifetime'], $params['path'] . '; samesite=' . $params['samesite'],
+        $params['domain'], $params['secure'], $params['httponly']
+      );
+    }
+
+    session_name(AUTH_SESSION_NAME);
     session_start();
   }
 
   /* Signing out is a state change, so it carries the same token as the form */
   if(isset($_GET[AUTH_PARAM_LOGOUT]))
   {
-    if(isset($_SESSION['csrf'])
-      && hash_equals($_SESSION['csrf'], (string) $_GET[AUTH_PARAM_LOGOUT]))
+    if(isset($_SESSION['logout'])
+      && hash_equals($_SESSION['logout'], (string) $_GET[AUTH_PARAM_LOGOUT]))
     {
       $_SESSION = [];
 
@@ -1066,13 +1177,18 @@ function authenticate($users, $realm, $options = [])
   }
 
   /**
-   * Verify against a dummy hash when the user is unknown, so that a missing
-   * account takes the same time as a wrong password and cannot be told apart
+   * Verify against a real configured hash when the user is unknown, so that
+   * a missing account takes the same time as a wrong password and cannot be
+   * told apart.
+   *
+   * It has to be one of the configured hashes rather than a literal: a
+   * hardcoded bcrypt cost 12 against credentials generated with
+   * PASSWORD_DEFAULT, which is cost 10 before PHP 8.4, would make an unknown
+   * username take roughly four times as long as a wrong password. That is a
+   * clearer signal than not equalising at all, and worse again under Argon2
    */
   $known = isset($users[$username]);
-  $hash = $known
-    ? $users[$username]
-    : '$2y$12$usesomesillystringfortestingpvHrJk3G6.Ll5Qm6Tx0RGa4jXe2Wm';
+  $hash = $known ? $users[$username] : reset($users);
 
   if(!password_verify($password, $hash) || !$known)
   {
@@ -1090,6 +1206,13 @@ function authenticate($users, $realm, $options = [])
   $_SESSION['user'] = $username;
   $_SESSION['seen'] = time();
   $_SESSION['csrf'] = bin2hex(random_bytes(32));
+
+  /**
+   * Separate from the form token, because this one is rendered into a link
+   * and so reaches browser history, access logs and any Referer. Sharing one
+   * value would put the token guarding the login form in all of those too
+   */
+  $_SESSION['logout'] = bin2hex(random_bytes(32));
 
   /* Redirect so a refresh does not repost the form */
   header('Location: ' . authLocalTarget());
@@ -1205,7 +1328,14 @@ if(isset($config['authentication'])
     }
   } else {
     /* Don't use any potential `users` array to authenticate, use main array instead */
-    authenticate($config['authentication'], 'Restricted content.', []);
+    /**
+     * The flat form is the credential map itself, so it carries no options.
+     * Passing it as both means a stray option key is caught by the credential
+     * check below and named, instead of being read as a username
+     */
+    authenticate(
+      $config['authentication'], 'Restricted content.', $config['authentication']
+    );
   }
 }
 
@@ -2890,16 +3020,6 @@ function constructServerNameNotice()
 }
 
 /**
- * Builds the footer for the page
- *
- * @param Float     $renderTime       Render time
- * @param String    $currentDirectory Current directory
- * @param Array     $config           Configuration values
- * @param String    $version          Current version
- * 
- * @return String
- */ 
-/**
  * Shows who is signed in, and offers a way to stop being signed in
  *
  * Without this the session could be created but never deliberately ended,
@@ -2909,7 +3029,7 @@ function constructServerNameNotice()
  */
 function constructSessionNotice()
 {
-  if(!isset($_SESSION['user'], $_SESSION['csrf']))
+  if(!isset($_SESSION['user'], $_SESSION['logout']))
   {
     return '';
   }
@@ -2921,12 +3041,22 @@ function constructSessionNotice()
     Helpers::createElement('span', [], $_SESSION['user']),
     Helpers::createElement('a', [
       /* Carries the session token, so a link from elsewhere cannot sign you out */
-      'href' => sprintf('?%s=%s', AUTH_PARAM_LOGOUT, rawurlencode($_SESSION['csrf'])),
+      'href' => sprintf('?%s=%s', AUTH_PARAM_LOGOUT, rawurlencode($_SESSION['logout'])),
       'class' => 'signOut'
     ], 'Sign out')
   ), true);
 }
 
+/**
+ * Builds the footer for the page
+ *
+ * @param Float     $renderTime       Render time
+ * @param String    $currentDirectory Current directory
+ * @param Array     $config           Configuration values
+ * @param String    $version          Current version
+ * 
+ * @return String
+ */ 
 function constructFooter($renderTime, $currentDirectory, $config, $version)
 {
   $footerHtml = [

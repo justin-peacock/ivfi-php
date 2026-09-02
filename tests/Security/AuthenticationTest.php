@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Ivfi\Tests\Security;
 
 use Ivfi\Tests\Support\Fixture;
+use Ivfi\Tests\Support\Indexer;
 use Ivfi\Tests\Support\IndexerTestCase;
 use Ivfi\Tests\Support\Response;
 use Ivfi\Tests\Support\Server;
@@ -35,8 +36,11 @@ final class AuthenticationTest extends IndexerTestCase
         $this->servers = [];
     }
 
-    private function serve(?string $credential = null, array $extra = []): Server
-    {
+    private function serve(
+        ?string $credential = null,
+        array $extra = [],
+        array $ini = []
+    ): Server {
         $fixture = new Fixture('session-auth');
         $fixture->file('private.jpg');
         $fixture->config([
@@ -49,7 +53,7 @@ final class AuthenticationTest extends IndexerTestCase
             ], $extra),
         ]);
 
-        $server = new Server($fixture);
+        $server = new Server($fixture, $ini);
         $this->servers[] = $server;
 
         return $server;
@@ -298,6 +302,74 @@ final class AuthenticationTest extends IndexerTestCase
     }
 
     /**
+     * Behind a proxy every request carries the proxy's address in REMOTE_ADDR,
+     * so a counter keyed on it treats the whole internet as one client: five
+     * bad attempts from anyone locks out everyone. When the operator says a
+     * proxy is in front, the forwarded address decides instead.
+     */
+    public function testForwardedAddressesAreThrottledSeparately(): void
+    {
+        $server = $this->serve(null, [
+            'behind_proxy' => true,
+            'client_ip_header' => 'CF-Connecting-IP',
+        ]);
+
+        /* One address burns through its allowance */
+        for ($attempt = 0; $attempt < 6; $attempt++) {
+            $login = $server->request('/', ['CF-Connecting-IP' => '198.51.100.10']);
+
+            $server->request('/', ['CF-Connecting-IP' => '198.51.100.10'], [
+                'ivfi_user' => self::USER,
+                'ivfi_pass' => 'wrong',
+                'ivfi_csrf' => $this->token($login),
+            ]);
+        }
+
+        $server->clearCookies();
+
+        /* A different one must be unaffected */
+        $login = $server->request('/', ['CF-Connecting-IP' => '203.0.113.20']);
+        $other = $server->request('/', ['CF-Connecting-IP' => '203.0.113.20'], [
+            'ivfi_user' => self::USER,
+            'ivfi_pass' => self::PASS,
+            'ivfi_csrf' => $this->token($login),
+        ]);
+
+        $this->assertSame(
+            '302 Found',
+            $other->header('Status'),
+            "one visitor's failures locked out everybody behind the proxy"
+        );
+    }
+
+    /**
+     * The forwarded address is only believed when the operator opts in, since
+     * any client can send the header.
+     */
+    public function testForwardedAddressIsIgnoredWithoutOptIn(): void
+    {
+        $server = $this->serve();
+
+        for ($attempt = 0; $attempt < 6; $attempt++) {
+            $login = $server->request('/', ['X-Forwarded-For' => '198.51.100.' . $attempt]);
+
+            $server->request('/', ['X-Forwarded-For' => '198.51.100.' . $attempt], [
+                'ivfi_user' => self::USER,
+                'ivfi_pass' => 'wrong',
+                'ivfi_csrf' => $this->token($login),
+            ]);
+        }
+
+        $result = $this->signIn($server, self::PASS);
+
+        $this->assertSame(
+            '429 Too Many Requests',
+            $result->header('Status'),
+            'a spoofed forwarded address was enough to reset the counter'
+        );
+    }
+
+    /**
      * A lockout that the right password walks through is not a lockout.
      */
     public function testLockoutAlsoRefusesTheCorrectPassword(): void
@@ -312,6 +384,175 @@ final class AuthenticationTest extends IndexerTestCase
 
         $this->assertSame('429 Too Many Requests', $result->header('Status'));
         $this->assertStringNotContainsString('private.jpg', $server->request('/')->body);
+    }
+
+    /**
+     * session_set_cookie_params() and session_name() only work before a session
+     * exists. Called while one is already active they warn and return false,
+     * and the cookie silently keeps PHP's defaults: no HttpOnly, no SameSite,
+     * and the wrong name. Every protection here, quietly off.
+     */
+    public function testCookieStaysHardenedWhenASessionAutoStarts(): void
+    {
+        $server = $this->serve(null, [], ['session.auto_start' => '1']);
+
+        $attributes = $server->request('/')->cookieAttributes('IVFISESS');
+
+        $this->assertNotEmpty(
+            $attributes,
+            'no IVFISESS cookie was set, so the session name was lost'
+        );
+        $this->assertContains('httponly', $attributes);
+        $this->assertContains('samesite=lax', $attributes);
+    }
+
+    /**
+     * A chain of two proxies sends `https, http`, where the leftmost entry is
+     * what the original client used.
+     */
+    public function testChainedForwardedProtoIsUnderstood(): void
+    {
+        $server = $this->serve(null, ['behind_proxy' => true]);
+
+        $attributes = $server->request('/', [
+            'X-Forwarded-Proto' => 'https, http',
+        ])->cookieAttributes('IVFISESS');
+
+        $this->assertContains(
+            'secure',
+            $attributes,
+            'the cookie was issued without Secure on an HTTPS request'
+        );
+    }
+
+    /**
+     * The sign-out token is rendered into a link, so it reaches history and
+     * access logs. It must not be the token that guards the login form.
+     */
+    public function testSignOutTokenIsNotTheFormToken(): void
+    {
+        $server = $this->serve();
+
+        $this->signIn($server, self::PASS);
+
+        preg_match('#href="\?ivfi_logout=([^"]+)"#', $server->request('/')->body, $m);
+
+        $logoutToken = $m[1] ?? '';
+
+        $this->assertNotEmpty($logoutToken);
+
+        $server->request('/?ivfi_logout=' . $logoutToken);
+        $server->request('/');
+
+        /* The leaked value must be useless against the form */
+        $result = $server->request('/', [], [
+            'ivfi_user' => self::USER,
+            'ivfi_pass' => self::PASS,
+            'ivfi_csrf' => $logoutToken,
+        ]);
+
+        $this->assertStringContainsString(
+            'session expired',
+            $result->body,
+            'the sign-out token was accepted as the login form token'
+        );
+    }
+
+    /**
+     * The counter file must not be a fixed name in a shared directory, where
+     * another local user can create it unwritable in advance and turn
+     * throttling off for good.
+     */
+    public function testThrottleFileIsPerInstallationAndPrivate(): void
+    {
+        $fixture = new Fixture('throttle-file');
+        $fixture->file('private.jpg');
+        $fixture->config([
+            'authentication' => [
+                'users' => [self::USER => password_hash(self::PASS, PASSWORD_DEFAULT)],
+                'throttle_path' => $fixture->root(),
+            ],
+        ]);
+
+        $server = new Server($fixture);
+        $this->servers[] = $server;
+
+        $login = $server->request('/');
+        $server->request('/', [], [
+            'ivfi_user' => self::USER,
+            'ivfi_pass' => 'wrong',
+            'ivfi_csrf' => $this->token($login),
+        ]);
+
+        $files = glob($fixture->root() . '/ivfi-auth*.json');
+
+        $this->assertNotEmpty($files, 'no throttle file was written');
+        $this->assertNotSame(
+            $fixture->root() . '/ivfi-auth.json',
+            $files[0],
+            'the throttle file uses a fixed, predictable name'
+        );
+        $this->assertSame(
+            '0600',
+            substr(sprintf('%o', fileperms($files[0])), -4),
+            'the throttle file is readable by other users'
+        );
+    }
+
+    /**
+     * With the flat credential form the options sit in the same array, so a
+     * misplaced option key would otherwise be read as a username and reported
+     * as a password hash problem, pointing nowhere near the mistake.
+     */
+    public function testMisplacedOptionKeyIsNamed(): void
+    {
+        $fixture = new Fixture('flat-options');
+        $fixture->file('private.jpg');
+        $fixture->config([
+            'authentication' => [
+                self::USER => password_hash(self::PASS, PASSWORD_DEFAULT),
+                'behind_proxy' => true,
+            ],
+        ]);
+
+        $response = Indexer::render($fixture);
+
+        $this->assertStringNotContainsString('private.jpg', $response->body);
+
+        /**
+         * Both forms refuse the config. What matters is that the log points at
+         * the actual mistake rather than reporting a password hash problem
+         * about a key that was never meant to be a credential
+         */
+        $this->assertStringContainsString(
+            'behind_proxy',
+            $response->stderr,
+            'the log did not name the misplaced key'
+        );
+        $this->assertStringContainsString('is an authentication option', $response->stderr);
+    }
+
+    /**
+     * The unknown-user path verifies against a configured hash, so it has to
+     * keep working whatever algorithm the operator chose.
+     */
+    public function testUnknownUserIsRejectedWithArgonCredentials(): void
+    {
+        if (!defined('PASSWORD_ARGON2ID')) {
+            $this->markTestSkipped('argon2id is not available in this build');
+        }
+
+        $server = $this->serve(password_hash(self::PASS, PASSWORD_ARGON2ID));
+
+        $login = $server->request('/');
+        $result = $server->request('/', [], [
+            'ivfi_user' => 'nobody',
+            'ivfi_pass' => 'wrong',
+            'ivfi_csrf' => $this->token($login),
+        ]);
+
+        $this->assertStringContainsString('Incorrect username or password', $result->body);
+        $this->assertStringNotContainsString('private.jpg', $result->body);
     }
 
     /**
