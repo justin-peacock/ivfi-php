@@ -100,10 +100,10 @@ a guess:
 | `strictBindCallApply` | 0, enabled |
 | `noImplicitReturns` | 0, enabled |
 | `strictFunctionTypes` | 0, enabled |
-| `noImplicitThis` | 104 |
+| `noImplicitThis` | 0, enabled |
 | `noImplicitAny` | 233 |
 | `strictNullChecks` | 801 |
-| `strict` | 1114 |
+| `strict` | 1010 |
 
 `strict` is TypeScript's umbrella flag, measured on its own. It does not
 include `noImplicitReturns`, and it switches on `alwaysStrict`,
@@ -115,5 +115,5 @@ because TypeScript 4.9, the version the lockfile held, crashed on this source
 with an internal `TypeError` in the checker rather than reporting
 diagnostics. It is by far the largest item.
 
-A sensible order is `noImplicitThis`, `noImplicitAny`, then
-`strictNullChecks`, one flag per change so each one is reviewable.
+A sensible order is `noImplicitAny`, then `strictNullChecks`, one flag
+per change so each one is reviewable.
