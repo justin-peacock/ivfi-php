@@ -2630,7 +2630,7 @@ foreach($defaults as $key => $value)
 }
 
 /* Used to bust the cache (query-strings for js and css files) */
-$bust = md5($config['debug'] ? time() : $version);
+$bust = md5($config['debug'] ? time() : $version . '<%= buildId %>');
 
 /* Default stylesheet output */
 $baseStylesheet = sprintf(
