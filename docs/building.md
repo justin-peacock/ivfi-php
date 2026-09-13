@@ -68,8 +68,9 @@ vendor/bin/phpunit
 ```
 
 It covers output encoding against a fixture tree of hostile filenames, the
-prepend-path header, error handling, path containment, and a real HTTP digest
-exchange. There are also golden-file snapshots of whole rendered listings.
+prepend-path header, error handling, path containment, hostile client cookies,
+theme discovery, configuration defaults, and the whole sign-in flow. There are
+also golden-file snapshots of whole rendered listings.
 
 When a change to the markup is intended, regenerate the snapshots and read the
 diff before committing it:
@@ -78,10 +79,10 @@ diff before committing it:
 UPDATE_GOLDEN=1 vendor/bin/phpunit
 ```
 
-The authentication tests drive a genuine digest challenge and response against
-PHP's built-in web server, so they read the nonce the server actually issued
-rather than reconstructing it. That also covers the response status codes, which
-the CLI does not emit. No extra binaries are needed.
+The authentication tests drive the real sign-in flow against PHP's built-in web
+server, so they use the session cookie and form token the server actually
+issued rather than reconstructing them. That also covers the response status
+codes and headers, which the CLI does not emit. No extra binaries are needed.
 
 The suite itself needs PHP 8.2 or newer, because that is PHPUnit 11's floor.
 That is a constraint on the tooling, not on the script, which still runs on

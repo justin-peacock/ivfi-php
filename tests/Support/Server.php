@@ -39,18 +39,11 @@ final class Server
         );
 
         /**
-         * The built-in server hands the credentials over as a plain header,
-         * where the script expects the value a CGI SAPI would have put in
-         * PHP_AUTH_DIGEST, so bridge the two. Kept outside the document root
-         * so the router does not appear in the listing it is serving.
+         * Kept outside the document root so the router does not appear in
+         * the listing it is serving.
          */
         $written = file_put_contents($this->router, <<<'PHP'
 <?php
-if (isset($_SERVER['HTTP_AUTHORIZATION'])
-    && stripos($_SERVER['HTTP_AUTHORIZATION'], 'Digest ') === 0) {
-    $_SERVER['PHP_AUTH_DIGEST'] = substr($_SERVER['HTTP_AUTHORIZATION'], 7);
-}
-
 $root = $_SERVER['DOCUMENT_ROOT'];
 $path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
 $file = $root . rawurldecode((string) $path);
@@ -104,9 +97,6 @@ PHP);
         }
     }
 
-    /**
-     * @param array<string, string> $headers
-     */
     /**
      * @param array<string, string> $headers
      * @param array<string, string>|null $post Form fields, which make it a POST

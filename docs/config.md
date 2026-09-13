@@ -22,10 +22,11 @@ A basic example of a config file:
 <?php
 return array(
     'authentication' => array(
-		'users' => array(
-			'username' => 'password'
-		),
-		'restrict' => '/^\/(protected|secret|directory\/protected)\/?/i'
+        'users' => array(
+            /* Not a real hash: generate one, see Authentication below */
+            'username' => 'REPLACE WITH THE OUTPUT OF password_hash()'
+        ),
+        'restrict' => '/^\/(protected|secret|directory\/protected)\/?/i'
     ),
     'icon' => array(
         'path' => '/favicon.png',
@@ -128,7 +129,8 @@ Example:
 return array(
     'authentication' => array(
         'users' => array(
-            'username' => '$2y$12$abcdefghijklmnopqrstuv...'
+            /* Not a real hash: generate one with the command above */
+            'username' => 'REPLACE WITH THE OUTPUT OF password_hash()'
         ),
         'restrict' => '/^\/(protected|secret|directory\/protected)\/?/i'
     )
@@ -224,7 +226,7 @@ If the value is a function, then the returned string of that function will be us
 
 * `$param['counts']` contains two keys — `files` and `directories` — both showing the respective file and directory count of the current directory.
 
-* `$param['path']` contains two keys — `total` and `readable` — both showing the total size of the directory. The `total` value contains the total bytes and the `readable` value contains the readable size.
+* `$param['size']` contains two keys — `total` and `readable` — both showing the total size of the directory. The `total` value contains the total bytes and the `readable` value contains the readable size.
 
 * `$param['config']` contains the parsed and active configuration.
 
@@ -256,7 +258,7 @@ The `compact` setting can be changed by the client in the settings menu, as can 
 
 | Child key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `themes => path` | Bool/String | `/indexer/themes/` | Set to a path relative to the root directory containing `.css` files. Every `.css` file in the set folder will be treated as a separate theme.
+| `themes => path` | Bool/String | `/indexer/themes/` | Set to a path relative to the root directory containing `.css` files. Every `.css` file in the set folder will be treated as a separate theme, as will every sub-directory holding an `index.css` or a `.css` file of the same name.
 | `themes => default` | Bool/String | `false` | Default theme for new clients to use. Takes a filename **without** the `.css` extension.
 | `css => additional` | Array/String | `false` | Adds any additional CSS to the page. Can either be a pure CSS `string` or an `array` where the key is the selector and where the child keys and values are properties and values respectively.
 | `compact` | Bool | `false` | Makes the page use a more compact and centered style.

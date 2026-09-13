@@ -16,7 +16,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node: [ '20', '22', '24' ]
+        # 20 is end of life, so the floor is the older of the two active LTS lines
+        node: [ '22', '24' ]
 
     name: Build (Node ${{ matrix.node }})
 
@@ -42,7 +43,7 @@ jobs:
       run: npm run make-standalone
 
     - name: Archive production artifacts
-      if: matrix.node == '22'
+      if: matrix.node == '24'
       uses: actions/upload-artifact@v4
       with:
         name: build
@@ -73,7 +74,7 @@ jobs:
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
-        node-version: '22'
+        node-version: '24'
         cache: npm
 
     # The suite runs against the built indexer.php, not the webpack template

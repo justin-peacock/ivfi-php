@@ -8,7 +8,7 @@
 
 <p align="center">
 <a href="https://github.com/sixem/ivfi-php/releases"><img alt="GitHub releases" src="https://img.shields.io/github/v/release/sixem/ivfi-php?color=2f394f&style=flat"></a> <img alt="GitHub issues" src="https://img.shields.io/github/issues/sixem/ivfi-php?color=5a8f4e&style=flat"> <img alt="GitHub repo size" src="https://img.shields.io/github/repo-size/sixem/ivfi-php?color=4b8b72&style=flat"> 
-<img alt="Travis (.com)" src="https://img.shields.io/travis/com/sixem/ivfi-php?style=flat">
+<a href="https://github.com/sixem/ivfi-php/actions/workflows/main.yml"><img alt="Build" src="https://github.com/sixem/ivfi-php/actions/workflows/main.yml/badge.svg"></a>
 </p>
 
 ---
@@ -34,7 +34,7 @@ You can visit the [demo](https://five.sh/demo/indexer/) to view the indexer in a
 
 ## Features
 #### **Authentication**
-The script supports HTTP authentication, allowing you to add a bit of protection to your directories.
+Directories can be gated behind a sign-in form, with hashed credentials, a session cookie and lockout after repeated failures. (See: [Configuration](config.md#authentication))
 #### **Gallery Mode**
 A gallery mode where you can view images and videos of the current directory without needing to visit each URL separately. It has support for downloading files and reverse searching images.
 #### **Hover Previews**
