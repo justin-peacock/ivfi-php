@@ -181,7 +181,7 @@ export default class galleryClass
 
 		if(this.items.length === 0)
 		{
-			return false;
+			return;
 		}
 
 		if(!this.exists())

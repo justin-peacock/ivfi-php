@@ -122,7 +122,7 @@ export function mousemove(e)
 
 	if(!this.loaded)
 	{
-		return false;
+		return;
 	}
 
 	update.call(this);

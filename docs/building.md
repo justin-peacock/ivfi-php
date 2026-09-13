@@ -98,12 +98,12 @@ a guess:
 | Flag | Errors |
 |------|--------|
 | `strictBindCallApply` | 0, enabled |
-| `noImplicitReturns` | 2 |
+| `noImplicitReturns` | 0, enabled |
 | `strictFunctionTypes` | 10 |
 | `noImplicitThis` | 104 |
 | `noImplicitAny` | 233 |
-| `strictNullChecks` | 805 |
-| `strict` | 1122 |
+| `strictNullChecks` | 800 |
+| `strict` | 1123 |
 
 `strict` is TypeScript's umbrella flag, measured on its own. It does not
 include `noImplicitReturns`, and it switches on `alwaysStrict`,
@@ -115,6 +115,6 @@ because TypeScript 4.9, the version the lockfile held, crashed on this source
 with an internal `TypeError` in the checker rather than reporting
 diagnostics. It is by far the largest item.
 
-A sensible order is `noImplicitReturns`, `strictFunctionTypes`,
-`noImplicitThis`, `noImplicitAny`, then `strictNullChecks`, one flag per change
-so each one is reviewable.
+A sensible order is `strictFunctionTypes`, `noImplicitThis`,
+`noImplicitAny`, then `strictNullChecks`, one flag per change so each one is
+reviewable.

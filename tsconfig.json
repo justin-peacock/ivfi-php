@@ -9,10 +9,11 @@
         // this every installed @types/* is pulled in, including @types/node,
         // whose newer releases use syntax this TypeScript cannot parse.
         "types": ["modernizr"],
-        // Enabled because it already passes. The rest of the strict family is
+        // Enabled because they already pass. The rest of the strict family is
         // staged work, see docs/building.md: noImplicitAny is 233 errors,
-        // noImplicitThis 104 and strictNullChecks 805 on TypeScript 5.9.
+        // noImplicitThis 104 and strictNullChecks 800 on TypeScript 5.9.
         "strictBindCallApply": true,
+        "noImplicitReturns": true,
         "sourceMap": true,
         "allowSyntheticDefaultImports": true,
         "esModuleInterop": true,
