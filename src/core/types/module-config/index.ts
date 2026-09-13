@@ -56,6 +56,9 @@ export type TConfigUpload = {
 	/** Whether directories may be created as well as files uploaded */
 	directories?: boolean;
 	directoryAction?: string;
+	/** Whether files and empty directories may be deleted */
+	delete?: boolean;
+	deleteAction?: string;
 	fields?: {
 		action?: string;
 		file?: string;
