@@ -1635,6 +1635,32 @@ function uploadErrorMessage($code)
 }
 
 /**
+ * Claims a name for a staged file without overwriting anything
+ *
+ * @param String  $staged  The staged file
+ * @param String  $target  The name to claim
+ *
+ * @return Boolean
+ */
+function uploadClaim($staged, $target)
+{
+  /**
+   * Checked rather than called and caught. Shared hosts routinely put `link`
+   * in `disable_functions`, and on PHP 8 a disabled function is gone from the
+   * function table rather than returning false: calling it raises an `Error`
+   * that `@` does not suppress, which would abandon the staged file and answer
+   * with a 500 carrying no JSON at all. Those hosts are exactly the ones the
+   * fallback below exists for
+   */
+  if(!function_exists('link'))
+  {
+    return false;
+  }
+
+  return @link($staged, $target);
+}
+
+/**
  * Answers an upload request, ending the request
  *
  * @param Integer  $status   HTTP status code
@@ -1992,7 +2018,7 @@ function handleUpload($indexer, $config, $available)
         'error' => 'The file could not be written.'
       ]);
     }
-  } else if(!@link($staged, $target))
+  } else if(!uploadClaim($staged, $target))
   {
     /**
      * `link()` is the atomic claim on a name: it fails outright when anything
@@ -2010,7 +2036,8 @@ function handleUpload($indexer, $config, $available)
        * to the window this rename occupies
        */
       error_log(sprintf(
-        'IVFi: %s does not support hard links, so uploads there cannot claim a name atomically',
+        'IVFi: could not hard link into %s (unsupported, or `link` is disabled), '
+          . 'so uploads there cannot claim a name atomically',
         $directory
       ));
     } else {
@@ -4094,6 +4121,15 @@ function constructJsConfig($config, $sorting, $timestamp, $bust, $theme, $upload
       'extensions' => uploadAllowedExtensions(
         $config['upload'], $config['extensions']
       ),
+      /**
+       * The non-overridable lists, so the client can turn away a name the
+       * endpoint would refuse for an extension that is not the last one, such
+       * as `payload.php.jpg`. Nothing here is a secret: it is a fixed list,
+       * and the refusal happens server-side whether the client knows or not
+       */
+      'blocked' => array_values(array_merge(
+        UPLOAD_BLOCKED_EXTENSIONS, UPLOAD_ACTIVE_EXTENSIONS
+      )),
       /**
        * So the client can turn an oversized file away itself. A body past
        * `post_max_size` is discarded before the script runs, which otherwise

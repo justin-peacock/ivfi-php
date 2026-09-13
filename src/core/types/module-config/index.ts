@@ -59,6 +59,8 @@ export type TConfigUpload = {
 		token?: string;
 	};
 	extensions?: Array<string>;
+	/** Extensions the endpoint refuses whatever the allowlist says */
+	blocked?: Array<string>;
 	/** Largest accepted file in bytes, where zero means no limit */
 	maxSize?: number;
 	overwrite?: boolean;

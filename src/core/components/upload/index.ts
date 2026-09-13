@@ -59,6 +59,8 @@ class componentUpload
 
 	private close: HTMLElement = null;
 
+	private announcer: HTMLElement = null;
+
 	private queue: Array<TQueued> = [];
 
 	private busy = false;
@@ -73,12 +75,20 @@ class componentUpload
 	{
 		this.settings = config.get('upload') || {};
 
+		/**
+		 * Claimed before the check, not after it. Navigating from a page that
+		 * accepts uploads to one that does not builds a component that returns
+		 * here, and leaving the marker alone would leave the previous page's
+		 * instance live: it would still answer drops, and still show a drop
+		 * target, on a page that has no upload to offer
+		 */
+		this.claim();
+
 		if(!this.settings.enabled)
 		{
 			return this;
 		}
 
-		this.claim();
 		this.bind();
 
 		return this;
@@ -274,10 +284,17 @@ class componentUpload
 		const separator = Math.max(name.lastIndexOf('/'), name.lastIndexOf('\\'));
 		const base = separator === -1 ? name : name.slice(separator + 1);
 
+		/**
+		 * Space, tab and dot, which is what `rtrim()`/`ltrim()` are given
+		 * server-side. `\s` would be wrong here: it covers Unicode whitespace
+		 * the server keeps, so a name ending in a non-breaking space would look
+		 * like a plain `.jpg` to this check and reach the endpoint as one
+		 * ending in `jpg\u00a0`, which no allowlist has
+		 */
 		/* eslint-disable-next-line no-control-regex */
 		return base.replace(/[\x00-\x1F\x7F]+/g, '')
-			.replace(/^[\s.]+/, '')
-			.replace(/[\s.]+$/, '');
+			.replace(/^[ \t.]+/, '')
+			.replace(/[ \t.]+$/, '');
 	};
 
 	/**
@@ -299,9 +316,24 @@ class componentUpload
 			return 'No file extension';
 		}
 
-		if(!extensions.includes(parts[parts.length - 1]))
+		const extension = parts[parts.length - 1];
+
+		if(!extensions.includes(extension))
 		{
-			return `.${parts[parts.length - 1]} is not accepted here`;
+			return `.${extension} is not accepted here`;
+		}
+
+		/**
+		 * The endpoint refuses a blocked extension anywhere in the name, not
+		 * only at the end, because Apache can hand `payload.php.jpg` to PHP.
+		 * Checked here too, so such a drop is named rather than uploaded in
+		 * full and then answered with a 415
+		 */
+		const blocked = this.settings.blocked || [];
+
+		if(parts.slice(1, -1).some((part: string) => blocked.includes(part)))
+		{
+			return 'That name carries an extension the server may execute';
 		}
 
 		if(maximum > 0 && file.size > maximum)
@@ -441,11 +473,22 @@ class componentUpload
 			class : 'uploadList'
 		});
 
+		/**
+		 * Only outcomes are announced, not progress. A live region carrying the
+		 * percentages would read every one of them out, which buries the thing
+		 * the listener actually needs in a count from 0 to 100
+		 */
+		this.announcer = DOM.new('div', {
+			class : 'uploadAnnouncer',
+			role : 'status',
+			'aria-live' : 'polite'
+		});
+
 		this.panel = DOM.new('div', {
 			class : 'uploadPanel'
 		});
 
-		this.panel.append(header, this.list);
+		this.panel.append(header, this.list, this.announcer);
 		document.body.append(this.panel);
 
 		eventHooks.listen(close, 'click', 'uploadClose', () => this.dismiss());
@@ -481,6 +524,7 @@ class componentUpload
 			this.panel = null;
 			this.list = null;
 			this.close = null;
+			this.announcer = null;
 		}
 	};
 
@@ -571,6 +615,14 @@ class componentUpload
 		DOM.style.set(queued.bar, {
 			width : '100%'
 		});
+
+		/* The row changing colour is the whole outcome otherwise */
+		if(this.announcer)
+		{
+			this.announcer.textContent = `${queued.name.textContent}: ${
+				state === 'done' ? 'uploaded' : message
+			}`;
+		}
 	};
 
 	/**
@@ -622,6 +674,16 @@ class componentUpload
 	 */
 	private refresh = (): void =>
 	{
+		/**
+		 * A navigation away and back inside the delay would otherwise let an
+		 * instance from the old document reload the page the new one is on,
+		 * taking its queue with it
+		 */
+		if(!this.isLive())
+		{
+			return;
+		}
+
 		if(this.busy || this.queue.length > 0 || !this.settled())
 		{
 			return;

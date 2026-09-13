@@ -364,19 +364,132 @@ final class UploadTest extends IndexerTestCase
     }
 
     /**
-     * Staging happens inside the target directory, so a failed upload must not
-     * leave its working file behind.
+     * Staging happens inside the target directory, so nothing may be left
+     * behind under the working name.
+     *
+     * The successful case is the one that proves anything: it is the only one
+     * here that reaches staging at all, and so the only one that exercises the
+     * cleanup after the name is claimed. A refused upload is checked too, but
+     * it is turned away before a staged file exists. The failure paths after
+     * staging, where `link()` or `rename()` itself fails, are not reachable
+     * without a hook in the endpoint that exists only for the test.
      */
-    public function testARefusedUploadLeavesNoStagedFile(): void
+    public function testNoStagedFileIsLeftBehind(): void
     {
         $server = $this->serve();
         $token = $this->signIn($server);
 
+        [, $accepted] = $this->upload($server, $token, 'holiday.jpg', 'jpeg-bytes');
+
+        $this->assertTrue($accepted['ok'] ?? false);
+        $this->assertSame(
+            [],
+            glob($this->root() . '/.ivfi-upload-*') ?: [],
+            'the staged file survived a successful upload'
+        );
+
         $this->upload($server, $token, 'existing.jpg', 'replacement');
 
-        $staged = glob($this->root() . '/.ivfi-upload-*') ?: [];
+        $this->assertSame(
+            [],
+            glob($this->root() . '/.ivfi-upload-*') ?: [],
+            'a refused upload left a staged file behind'
+        );
+    }
 
-        $this->assertSame([], $staged, 'a staged upload was left behind');
+    /**
+     * A body over `post_max_size` is thrown away before the script runs, so it
+     * arrives as a POST carrying neither fields nor files and nothing that says
+     * it was an upload. It is recognised by that shape, because the alternative
+     * is a whole listing answering a request the client is parsing as JSON.
+     */
+    public function testABodyOverPostMaxSizeIsAnsweredAsJson(): void
+    {
+        $fixture = new Fixture('upload-over-post-max');
+        $fixture->config([
+            'upload' => ['enabled' => true],
+            'authentication' => [
+                'users' => [self::USER => password_hash(self::PASS, PASSWORD_DEFAULT)],
+                'throttle_path' => $fixture->root(),
+            ],
+        ]);
+
+        $server = new Server($fixture, [
+            'post_max_size' => '1K',
+            'upload_max_filesize' => '1K',
+        ]);
+
+        $this->servers[] = $server;
+        $this->fixtures[] = $fixture;
+
+        $token = $this->signIn($server);
+
+        /* Comfortably past the limit, so PHP discards the body outright */
+        [$response, $payload] = $this->upload(
+            $server, $token, 'holiday.jpg', str_repeat('a', 8192)
+        );
+
+        $this->assertStringStartsWith('413 ', (string) $response->header('Status'));
+        $this->assertStringStartsWith(
+            'application/json',
+            (string) $response->header('Content-Type'),
+            'the client was answered with something it cannot parse'
+        );
+        $this->assertFalse($payload['ok'] ?? false);
+        $this->assertStringContainsString('post_max_size', $payload['error'] ?? '');
+        $this->assertFileDoesNotExist($fixture->root() . '/holiday.jpg');
+    }
+
+    /**
+     * Shared hosts routinely put `link` in `disable_functions`, and on PHP 8 a
+     * disabled function is gone rather than returning false: calling it raises
+     * an `Error` that `@` does not suppress. Uploads there fall back to
+     * `rename()` instead of failing with no JSON and an abandoned staged file.
+     */
+    public function testUploadsWorkWhereLinkIsDisabled(): void
+    {
+        $fixture = new Fixture('upload-no-link');
+        $fixture->config([
+            'upload' => ['enabled' => true],
+            'authentication' => [
+                'users' => [self::USER => password_hash(self::PASS, PASSWORD_DEFAULT)],
+                'throttle_path' => $fixture->root(),
+            ],
+        ]);
+
+        $server = new Server($fixture, ['disable_functions' => 'link']);
+
+        $this->servers[] = $server;
+        $this->fixtures[] = $fixture;
+
+        $token = $this->signIn($server);
+
+        [$response, $payload] = $this->upload($server, $token, 'holiday.jpg', 'jpeg-bytes');
+
+        $this->assertSame('201 Created', $response->header('Status'));
+        $this->assertTrue($payload['ok'] ?? false);
+        $this->assertSame('jpeg-bytes', file_get_contents($fixture->root() . '/holiday.jpg'));
+        $this->assertSame(
+            [],
+            glob($fixture->root() . '/.ivfi-upload-*') ?: [],
+            'the staged file was abandoned'
+        );
+    }
+
+    /**
+     * The client is told the non-overridable lists, so a name the endpoint
+     * refuses for an extension that is not the last one can be turned away
+     * before it is uploaded rather than after.
+     */
+    public function testTheBlockedListReachesTheClient(): void
+    {
+        $server = $this->serve();
+        $this->signIn($server);
+
+        $blocked = $this->jsConfig($server->request('/'))['upload']['blocked'] ?? [];
+
+        $this->assertContains('php', $blocked);
+        $this->assertContains('svg', $blocked);
     }
 
     /**
