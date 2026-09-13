@@ -9,7 +9,16 @@ The browsable directory is `/data`. Mount a persistent volume there: uploads
 are written into it, and it is chowned to `www-data` at start if it is not
 already.
 
+In Coolify, set **Ports Exposes** to `80` (new applications default to
+`3000`), add a volume mount with destination `/data`, and leave **Ports
+Mappings** empty so the proxy is the only way in.
+
 ## Environment
+
+`.env.example` at the repository root is a starting point to paste into
+Coolify. None of these variables are needed at build time, so mark them
+runtime-only, and mark `IVFI_PASSWORD_HASH` literal: its `$` signs are
+otherwise interpolated away.
 
 | Variable | Default | Description |
 |----------|---------|-------------|

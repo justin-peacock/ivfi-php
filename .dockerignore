@@ -7,3 +7,6 @@ docker/public
 tests
 *.zip
 *.7z
+.env
+.env.example
+.coolify-token
