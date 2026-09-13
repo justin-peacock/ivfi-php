@@ -372,8 +372,7 @@ html > body > .rootGallery {
         min-width: 275px;
         width: 25vw;
         float: right;
-        overflow-y: scroll;
-        overflow-x: hidden;
+        overflow: hidden scroll;
         border-top: 1px solid #101010b8;
         position: relative;
         scrollbar-color: #222 #131315;
