@@ -66,7 +66,8 @@ final class ThemesTest extends IndexerTestCase
 
         $pool = $response->jsConfig()['style']['themes']['pool'];
 
-        $this->assertSame(['default', 'dark', 'a(b'], array_keys($pool));
+        /* Discovery does not sort, so the order is the filesystem's */
+        $this->assertEqualsCanonicalizing(['default', 'dark', 'a(b'], array_keys($pool));
         $this->assertSame('/themes/dark.css', $pool['dark']['path']);
         $this->assertSame('/themes/a(b/index.css', $pool['a(b']['path']);
     }
