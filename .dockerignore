@@ -1,0 +1,9 @@
+.git
+.github
+node_modules
+build
+vendor
+docker/public
+tests
+*.zip
+*.7z
