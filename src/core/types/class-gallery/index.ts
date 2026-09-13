@@ -52,8 +52,21 @@ export type TGalleryDataActive = {
 	scrollbreak?: boolean;
 	busy?: boolean;
 
-	boundEvents?: object;
-	body?: object;
+	/** Listeners bound while the gallery is open, keyed by the ID they
+	 * were `listen()`ed under, so they can be removed on unbind */
+	boundEvents?: {
+		[id: string]: {
+			selector: HTMLElement;
+			events: Array<string> | string;
+		};
+	};
+
+	/** The gallery's own inline style overrides, saved so they can be
+	 * restored when the gallery closes */
+	body?: {
+		'max-height': string;
+		overflow: string;
+	};
 
 	selected?: {
 		src: null | string;

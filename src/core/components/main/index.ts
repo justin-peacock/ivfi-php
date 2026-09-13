@@ -468,10 +468,9 @@ main.sortTableColumn = (target: HTMLElement) =>
 	const column: MComponentMain.ISortRow = !(target.tagName === 'TH') ? parent : (target as HTMLTableCellElement);
 	const columnIndex: number = DOM.getIndex(column);
 
-	const rows: {
-		directories: Array<HTMLElement>;
-		files: Array<HTMLElement>;
-	} = {
+	/* Homogeneous, so a plain index signature covers both the two known
+	 * keys used by name below and the dynamic loop over them at the end */
+	const rows: Record<string, Array<HTMLElement>> = {
 		directories : Array.from((selector.use('TABLE') as HTMLElement).querySelectorAll(
 			'tbody > tr.directory'
 		)),

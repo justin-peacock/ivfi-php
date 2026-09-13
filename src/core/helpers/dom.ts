@@ -97,7 +97,13 @@ export const DOM: TDomStructure = {
 
 				(keys).forEach((key: string): void =>
 				{
-					element.style[key] = styling[key];
+					/**
+					 * `CSSStyleDeclaration` only declares its known camelCase
+					 * properties, not a string index signature, but assigning
+					 * through one works for both camelCase and hyphenated CSS
+					 * property names, both of which callers pass here
+					 */
+					(element.style as unknown as Record<string, string>)[key] = styling[key];
 				});
 			}
 		}

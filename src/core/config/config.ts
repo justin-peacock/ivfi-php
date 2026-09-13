@@ -77,25 +77,35 @@ user.get = (): TUserStorage =>
 	let client: TUserStorage = {};
 	let update = false;
 
+	/**
+	 * `TUserStorage`'s own shape is precise, but the section names walked
+	 * here (`required`, and whatever `defaults` happens to have) are not
+	 * fixed at the type level, so these views are widened to match how
+	 * they are actually indexed below
+	 */
+	const dynDefaults = defaults as Record<string, any>;
+
 	try
 	{
 		client = JSON.parse(cookies.get(CookieKey));
+
+		const dynClient = client as Record<string, any>;
 
 		(required).forEach((key: string) =>
 		{
 			if(!Object.prototype.hasOwnProperty.call(client, key))
 			{
-				client[key] = Object.prototype.hasOwnProperty.call(defaults, key) ? defaults[key] : {};
+				dynClient[key] = Object.prototype.hasOwnProperty.call(defaults, key) ? dynDefaults[key] : {};
 			}
 		});
 
 		Object.keys(defaults).forEach((key: string) =>
 		{
-			Object.keys(defaults[key]).forEach((option: string) =>
+			Object.keys(dynDefaults[key]).forEach((option: string) =>
 			{
-				if(!Object.prototype.hasOwnProperty.call(client[key], option))
+				if(!Object.prototype.hasOwnProperty.call(dynClient[key], option))
 				{
-					client[key][option] = defaults[key][option];
+					dynClient[key][option] = dynDefaults[key][option];
 
 					update = true;
 				}
@@ -111,6 +121,8 @@ user.get = (): TUserStorage =>
 		/* On error means that the client does not have a valid cookie, so we're creating it */
 		client = {};
 
+		const dynClient = client as Record<string, any>;
+
 		/* Set default theme (if any) */
 		if((config.data).style.themes.set)
 		{
@@ -125,7 +137,7 @@ user.get = (): TUserStorage =>
 		/* Create keys */
 		(required).forEach((key) =>
 		{
-			client[key] = {};
+			dynClient[key] = {};
 		});
 
 		/* Merge and set cookie */

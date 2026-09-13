@@ -12,7 +12,11 @@ import {
 	HoverPreviewInstance
 } from './utils';
 
-const defaults = {
+import {
+	TPreviewOptions
+} from '../../types';
+
+const defaults: TPreviewOptions = {
 	delay: 75,
 	encodeAll: false,
 	cursor: true,
@@ -23,13 +27,13 @@ class hoverPreview
 {
 	public element: HTMLElement;
 
-	public options: object;
+	public options: TPreviewOptions;
 
 	private events: any;
 
 	private handle: any;
 
-	constructor(element: HTMLElement, options: object = {})
+	constructor(element: HTMLElement, options: TPreviewOptions = {})
 	{
 		if(!element)
 		{
@@ -113,4 +117,4 @@ function setup(this: HoverPreviewInstance)
 }
 
 // export default
-export default (element, options) => new hoverPreview(element, options)
+export default (element: HTMLElement, options: TPreviewOptions = {}) => new hoverPreview(element, options)

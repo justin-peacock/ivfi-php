@@ -3,13 +3,24 @@
 
 export const formatDate = (format: string, timestamp: number): string =>
 {
-	let jsdate, f, txtWords = [
+	/**
+	 * `jsdate` is a `Date`, but several format functions below do Date
+	 * arithmetic (`a - b`) that TypeScript only allows through `any` or an
+	 * explicit `.getTime()`; `any` matches the locals already used for the
+	 * same reason further down (`z`, `W`, `I`)
+	 */
+	let jsdate: any, f: Record<string, (...args: any[]) => any>, txtWords = [
 		'Sun', 'Mon', 'Tues', 'Wednes', 'Thurs', 'Fri', 'Satur',
 		'January', 'February', 'March', 'April', 'May', 'June',
 		'July', 'August', 'September', 'October', 'November', 'December'
 	], formatChr = /\\?(.?)/gi;
 
-	let formatChrCb = (t, s) => f[t] ? f[t]() : s;
+	/**
+	 * `t` is the whole match (an escaped character keeps its backslash, so
+	 * it never resolves in `f` and falls through to the literal); `s` is
+	 * the single captured character, used as that literal
+	 */
+	let formatChrCb = (t: string, s: string) => f[t] ? f[t]() : s;
 
 	let _pad = (n: string | number, c: number) =>
 	{

@@ -3,6 +3,7 @@
  */
 interface WindowCustomEvents extends Window {
 	CustomEvent?: any;
+	Event?: any;
 };
 
 type SwipeEvent = CustomEvent<{
@@ -28,14 +29,14 @@ type SwipeEvent = CustomEvent<{
  * @author John Doherty <www.johndoherty.info>
  * @license MIT
  */
-(function (window, document) {
+(function (window: WindowCustomEvents, document: Document) {
 
     'use strict';
 
     // patch CustomEvent to allow constructor creation (IE/Chrome)
     if (typeof window.CustomEvent !== 'function') {
 
-        (window as WindowCustomEvents).CustomEvent = function (event, params) {
+        (window as WindowCustomEvents).CustomEvent = function (event: string, params: CustomEventInit) {
 
             params = params || { bubbles: false, cancelable: false, detail: undefined };
 
@@ -51,19 +52,19 @@ type SwipeEvent = CustomEvent<{
     document.addEventListener('touchmove', handleTouchMove, false);
     document.addEventListener('touchend', handleTouchEnd, false);
 
-    var xDown = null;
-    var yDown = null;
-    var xDiff = null;
-    var yDiff = null;
-    var timeDown = null;
-    var startEl = null;
+    var xDown: number | null = null;
+    var yDown: number | null = null;
+    var xDiff: number | null = null;
+    var yDiff: number | null = null;
+    var timeDown: number | null = null;
+    var startEl: HTMLElement | null = null;
 
     /**
      * Fires swiped event if swipe detected on touchend
      * @param {object} e - browser event object
      * @returns {void}
      */
-    function handleTouchEnd(e) {
+    function handleTouchEnd(e: TouchEvent) {
 
         // if the user released on a different target, cancel!
         if (startEl !== e.target) return;
@@ -73,7 +74,12 @@ type SwipeEvent = CustomEvent<{
         var swipeTimeout = parseInt(getNearestAttribute(startEl, 'data-swipe-timeout', '500'), 10);    // default 500ms
         var timeDiff = Date.now() - timeDown;
         var eventType = '';
-        var changedTouches = e.changedTouches || e.touches || [];
+        /**
+         * Typed `any`: the fields read from an entry below (`touchType` in
+         * particular) are not part of the standard `Touch` shape, only of
+         * the touch devices this reads it from
+         */
+        var changedTouches: any = e.changedTouches || e.touches || [];
 
         if (swipeUnit === 'vh') {
             swipeThreshold = Math.round((swipeThreshold / 100) * document.documentElement.clientHeight); // get percentage of viewport height in pixels
@@ -106,9 +112,9 @@ type SwipeEvent = CustomEvent<{
             var eventData = {
                 dir: eventType.replace(/swiped-/, ''),
                 touchType: (changedTouches[0] || {}).touchType || 'direct',
-                xStart: parseInt(xDown, 10),
+                xStart: parseInt(String(xDown), 10),
                 xEnd: parseInt((changedTouches[0] || {}).clientX || -1, 10),
-                yStart: parseInt(yDown, 10),
+                yStart: parseInt(String(yDown), 10),
                 yEnd: parseInt((changedTouches[0] || {}).clientY || -1, 10)
             };
 
@@ -130,12 +136,12 @@ type SwipeEvent = CustomEvent<{
      * @param {object} e - browser event object
      * @returns {void}
      */
-    function handleTouchStart(e) {
+    function handleTouchStart(e: TouchEvent) {
 
         // if the element has data-swipe-ignore="true" we stop listening for swipe events
-        if (e.target.getAttribute('data-swipe-ignore') === 'true') return;
+        if ((e.target as HTMLElement).getAttribute('data-swipe-ignore') === 'true') return;
 
-        startEl = e.target;
+        startEl = e.target as HTMLElement;
 
         timeDown = Date.now();
         xDown = e.touches[0].clientX;
@@ -149,7 +155,7 @@ type SwipeEvent = CustomEvent<{
      * @param {object} e - browser event object
      * @returns {void}
      */
-    function handleTouchMove(e) {
+    function handleTouchMove(e: TouchEvent) {
 
         if (!xDown || !yDown) return;
 
@@ -167,7 +173,7 @@ type SwipeEvent = CustomEvent<{
      * @param {any} defaultValue - default value to return if no match found
      * @returns {any} attribute value or defaultValue
      */
-    function getNearestAttribute(el, attributeName, defaultValue) {
+    function getNearestAttribute(el: Element | null, attributeName: string, defaultValue: string): string {
 
         // walk up the dom tree looking for attributeName
         while (el && el !== document.documentElement) {
@@ -178,7 +184,7 @@ type SwipeEvent = CustomEvent<{
                 return attributeValue;
             }
 
-            el = el.parentNode;
+            el = el.parentNode as Element;
         }
 
         return defaultValue;

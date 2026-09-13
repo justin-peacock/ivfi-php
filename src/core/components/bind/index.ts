@@ -25,7 +25,7 @@ const scrollData: {
 	save: null
 };
 
-let debounceTimer = null;
+let debounceTimer: number | null = null;
 
 /* Scroll events to listen to */
 const scrollEvents: Array<string> = ['DOMMouseScroll', 'mousewheel', 'wheel'];
