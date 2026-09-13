@@ -80,6 +80,19 @@ main.menu.create = () =>
 		});
 	}
 
+	/**
+	 * Creating a directory follows the same gate as uploading, because it is
+	 * the same thing: writing into the directory being listed
+	 */
+	if(config.get('upload.enabled') === true
+		&& config.get('upload.directories') === true)
+	{
+		items.push({
+			text: data.text.menuLabels.directory.text,
+			id: 'directory'
+		});
+	}
+
 	items.forEach((item) =>
 	{
 		const element = DOM.new('div', {
@@ -132,6 +145,10 @@ main.menu.create = () =>
 			} else if(eventTarget.id == 'filter')
 			{
 				toggle(null, () => data.components.filter.toggle());
+
+			} else if(eventTarget.id == 'directory')
+			{
+				toggle(false, () => data.components.upload.createDirectory());
 			}
 		}
 	});

@@ -157,6 +157,24 @@ final class UploadTest extends IndexerTestCase
         return [$response, json_decode($response->body, true) ?? []];
     }
 
+    /**
+     * @return array{0: Response, 1: array<string, mixed>}
+     */
+    private function createDirectory(
+        Server $server,
+        string $token,
+        string $name,
+        string $uri = '/'
+    ): array {
+        $response = $server->request($uri, [], [
+            'ivfi_action' => 'directory',
+            'ivfi_csrf'   => $token,
+            'ivfi_name'   => $name,
+        ]);
+
+        return [$response, json_decode($response->body, true) ?? []];
+    }
+
     public function testAnAuthenticatedClientIsOfferedTheEndpoint(): void
     {
         $server = $this->serve();
@@ -874,6 +892,165 @@ final class UploadTest extends IndexerTestCase
         $this->assertTrue($payload['ok'] ?? false);
         $this->assertSame('holiday.jpg', $payload['file']['name'] ?? null);
         $this->assertFileExists($this->root() . '/holiday.jpg');
+    }
+
+    public function testADirectoryIsCreated(): void
+    {
+        $server = $this->serve();
+        $token = $this->signIn($server);
+
+        [$response, $payload] = $this->createDirectory($server, $token, 'holiday photos');
+
+        $this->assertSame('201 Created', $response->header('Status'));
+        $this->assertTrue($payload['ok'] ?? false);
+        $this->assertSame('holiday photos', $payload['directory']['name'] ?? null);
+        $this->assertDirectoryExists($this->root() . '/holiday photos');
+    }
+
+    public function testADirectoryIsCreatedInThePathItWasAskedFor(): void
+    {
+        $server = $this->serve();
+        $token = $this->signIn($server);
+
+        [, $payload] = $this->createDirectory($server, $token, 'nested', '/incoming/');
+
+        $this->assertTrue($payload['ok'] ?? false);
+        $this->assertDirectoryExists($this->root() . '/incoming/nested');
+        $this->assertDirectoryDoesNotExist($this->root() . '/nested');
+    }
+
+    public function testANameThatClimbsOutIsFlattenedForDirectoriesToo(): void
+    {
+        $server = $this->serve();
+        $token = $this->signIn($server);
+
+        [, $payload] = $this->createDirectory($server, $token, '../escaped', '/incoming/');
+
+        $this->assertTrue($payload['ok'] ?? false);
+        $this->assertDirectoryExists($this->root() . '/incoming/escaped');
+        $this->assertDirectoryDoesNotExist($this->root() . '/escaped');
+    }
+
+    /**
+     * A directory is not executed, but a typical handler mapping still routes a
+     * request for one named `reports.php` to the interpreter, which answers a
+     * request to browse it with a 404 instead of a listing.
+     */
+    #[DataProvider('unbrowsableDirectoryNames')]
+    public function testADirectoryNamedForAHandlerIsRefused(string $name): void
+    {
+        $server = $this->serve();
+        $token = $this->signIn($server);
+
+        [$response, $payload] = $this->createDirectory($server, $token, $name);
+
+        $this->assertStringStartsWith('400 ', (string) $response->header('Status'));
+        $this->assertFalse($payload['ok'] ?? false);
+        $this->assertDirectoryDoesNotExist($this->root() . '/' . ltrim($name, '.'));
+    }
+
+    /**
+     * @return array<string, array{0: string}>
+     */
+    public static function unbrowsableDirectoryNames(): array
+    {
+        return [
+            'php'       => ['reports.php'],
+            'phtml'     => ['reports.phtml'],
+            'uppercase' => ['reports.PHP'],
+            'middle'    => ['reports.php.stuff'],
+            'svg'       => ['drawings.svg'],
+        ];
+    }
+
+    /**
+     * Ordinary dots are not the problem, only the ones that name a handler.
+     */
+    public function testADirectoryMayCarryDotsInItsName(): void
+    {
+        $server = $this->serve();
+        $token = $this->signIn($server);
+
+        [, $payload] = $this->createDirectory($server, $token, 'v1.2.3 release');
+
+        $this->assertTrue($payload['ok'] ?? false);
+        $this->assertDirectoryExists($this->root() . '/v1.2.3 release');
+    }
+
+    public function testADirectoryCannotBeADotfile(): void
+    {
+        $server = $this->serve();
+        $token = $this->signIn($server);
+
+        [, $payload] = $this->createDirectory($server, $token, ' .hidden');
+
+        $this->assertTrue($payload['ok'] ?? false);
+        $this->assertSame('hidden', $payload['directory']['name'] ?? null);
+        $this->assertDirectoryExists($this->root() . '/hidden');
+        $this->assertDirectoryDoesNotExist($this->root() . '/.hidden');
+    }
+
+    public function testAnExistingNameIsNotReplacedByADirectory(): void
+    {
+        $server = $this->serve();
+        $token = $this->signIn($server);
+
+        [$response, $payload] = $this->createDirectory($server, $token, 'existing.jpg');
+
+        $this->assertSame('409 Conflict', $response->header('Status'));
+        $this->assertFalse($payload['ok'] ?? false);
+        $this->assertSame('original', file_get_contents($this->root() . '/existing.jpg'));
+    }
+
+    public function testCreatingADirectoryNeedsTheToken(): void
+    {
+        $server = $this->serve();
+        $this->signIn($server);
+
+        [$response, $payload] = $this->createDirectory($server, 'not-the-token', 'nope');
+
+        $this->assertSame('403 Forbidden', $response->header('Status'));
+        $this->assertFalse($payload['ok'] ?? false);
+        $this->assertDirectoryDoesNotExist($this->root() . '/nope');
+    }
+
+    public function testAnUnauthenticatedClientCannotCreateADirectory(): void
+    {
+        /* Authentication covers only `/incoming/`, leaving the root open */
+        $server = $this->serve([], [
+            'authentication' => ['restrict' => '#^/incoming/#'],
+        ]);
+
+        [$response, $payload] = $this->createDirectory($server, 'anything', 'nope');
+
+        $this->assertSame('403 Forbidden', $response->header('Status'));
+        $this->assertFalse($payload['ok'] ?? false);
+        $this->assertDirectoryDoesNotExist($this->root() . '/nope');
+    }
+
+    public function testDirectoriesCanBeTurnedOffWithoutTurningOffUploads(): void
+    {
+        $server = $this->serve(['directories' => false]);
+        $token = $this->signIn($server);
+
+        $config = $this->jsConfig($server->request('/'));
+
+        $this->assertTrue($config['upload']['enabled'] ?? false);
+        $this->assertFalse(
+            $config['upload']['directories'] ?? true,
+            'the page offered folder creation that is switched off'
+        );
+
+        [$response, $payload] = $this->createDirectory($server, $token, 'nope');
+
+        $this->assertSame('403 Forbidden', $response->header('Status'));
+        $this->assertFalse($payload['ok'] ?? false);
+        $this->assertDirectoryDoesNotExist($this->root() . '/nope');
+
+        /* Uploading still works, which is the point of the separate flag */
+        [, $uploaded] = $this->upload($server, $token, 'holiday.jpg', 'jpeg-bytes');
+
+        $this->assertTrue($uploaded['ok'] ?? false);
     }
 
     public function testAnUploadedFileIsReadableByTheServer(): void

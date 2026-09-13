@@ -58,6 +58,7 @@ if ($username !== null && ($password !== null || $hash !== null)) {
             ? true
             : array_values(array_filter(array_map('trim', explode(',', $extensions)))),
         'overwrite' => flag('IVFI_UPLOAD_OVERWRITE', false),
+        'directories' => flag('IVFI_UPLOAD_DIRECTORIES', true),
     ];
 
     if (($restrict = env('IVFI_UPLOAD_RESTRICT')) !== null) {

@@ -151,6 +151,7 @@ directory being viewed. Disabled by default.
 | `extensions` | Bool/Array | `true` | The accepted extensions, as an allowlist. `true` follows whatever [`extensions`](#extensions) lists as image or video. |
 | `max_size` | Bool/Int | `false` | Largest accepted file in bytes. `false` follows the php.ini limits. |
 | `overwrite` | Bool | `false` | Whether an upload may replace a file that is already there. |
+| `directories` | Bool | `true` | Whether folders may be created as well as files uploaded. |
 | `restrict` | Bool/String | `false` | Applies uploads only to paths matching the expression, the way `authentication`'s own `restrict` does. |
 
 ### Authentication is required
@@ -191,6 +192,24 @@ Beyond that: a leading dot is stripped, so an upload cannot create a dotfile; a
 name that describes a path is reduced to its last segment, so it cannot climb
 out of the directory; and a name that is not valid UTF-8 is refused rather than
 repaired.
+
+### Creating folders
+
+A signed-in client can also create a folder in the directory it is viewing,
+from the `[New] Folder` item in the menu. It follows the same gate as an upload
+and is switched off with `'directories' => false`, which leaves uploading on.
+
+The name goes through the same handling as an uploaded file's: reduced to one
+path segment, stripped of control characters and of leading whitespace and
+dots, and refused when it is not valid UTF-8 or is too long for the
+filesystem.
+
+Dots are otherwise fine (`v1.2.3 release` works), with one exception. A name
+ending in an extension from the blocklists above is refused, because a
+directory called `reports.php` is not executed but *is* handed to the
+interpreter by a typical handler mapping, which answers a request to browse it
+with a 404 rather than a listing. Refusing it at the point of creation is the
+only moment it can still be given a different name.
 
 ### Size limits
 
