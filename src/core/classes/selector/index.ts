@@ -36,7 +36,7 @@ export default class selectorClass
 		});
 
 		this.define('BODY', 'body', document);
-	}
+	};
 
 	public define = (selector: string, id: any = null, scope: any = null): void =>
 	{
@@ -49,7 +49,7 @@ export default class selectorClass
 		}
 
 		this.data[identifier] = element;
-	}
+	};
 
 	public use = (identifier: any): HTMLElement | boolean =>
 	{
@@ -71,5 +71,5 @@ export default class selectorClass
 		}
 
 		return this.data[identifier];
-	}
+	};
 }

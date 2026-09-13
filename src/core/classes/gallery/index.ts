@@ -138,7 +138,7 @@ export default class galleryClass
 		this.defaults = data;
 
 		return this.defaults;
-	}
+	};
 
 	/**
 	 * Initiates the class
@@ -209,7 +209,7 @@ export default class galleryClass
 		{
 			this.list.style.display = 'none';
 		}
-	}
+	};
 
 	/**
 	 * Preloads an image
@@ -272,7 +272,7 @@ export default class galleryClass
 				resolve({ src, img: null, dimensions: null, cancelled: true });
 			});
 		});
-	}
+	};
 
 	/**
 	 * Checks if an element has a scrollbar
@@ -291,7 +291,7 @@ export default class galleryClass
 		}, height);
 
 		return height > window.innerHeight;
-	}
+	};
 
 	/**
 	 * Encodes a URL
@@ -308,7 +308,7 @@ export default class galleryClass
 		encoded = encoded.replace('+', '%2B');
 
 		return encoded;
-	}
+	};
 
 	/**
 	 * Gets the extension from a filename
@@ -316,7 +316,7 @@ export default class galleryClass
 	private getExtension = (filename: string): string =>
 	{
 		return filename.split('.').pop().toLowerCase();
-	}
+	};
 
 	/**
 	 * Checks if the filename is an image
@@ -326,7 +326,7 @@ export default class galleryClass
 		return this.options.extensions.image.includes(
 			extension ? extension: this.getExtension(filename)
 		);
-	}
+	};
 
 	/**
 	 * Checks if the filename is a video
@@ -336,7 +336,7 @@ export default class galleryClass
 		return this.options.extensions.video.includes(
 			extension ? extension: this.getExtension(filename)
 		);
-	}
+	};
 
 	/**
 	 * Filters an array of items to make sure it only contains videos and images 
@@ -347,7 +347,7 @@ export default class galleryClass
 		{
 			return this.isImage(item.name) || this.isVideo(item.name);
 		});
-	}
+	};
 
 	/**
 	 * Gets the width of the scrollbar
@@ -378,7 +378,7 @@ export default class galleryClass
 		outer.parentNode.removeChild(outer);
 
 		return scrollbarWidth;
-	}
+	};
 
 	/**
 	 * Limits the body (hides overflow etc.)
@@ -426,7 +426,7 @@ export default class galleryClass
 				'padding-right': 'unset'
 			});
 		}
-	}
+	};
 
 	/**
 	 * Checks for an active gallery DOM element
@@ -436,7 +436,7 @@ export default class galleryClass
 		this.container = document.body.querySelector(':scope > div.rootGallery');
 
 		return this.container ? true: false;
-	}
+	};
 
 	/**
 	 * Shows or hides the gallery
@@ -546,7 +546,7 @@ export default class galleryClass
 
 			this.optimize.attemptRefresh();
 		}
-	}
+	};
 
 	/**
 	 * Sets the busy state (while loading images/videos)
@@ -572,7 +572,7 @@ export default class galleryClass
 		}
 
 		return this.data.busy;
-	}
+	};
 
 	/**
 	 * Enables the optimizer (performance mode) on the gallery list
@@ -668,7 +668,7 @@ export default class galleryClass
 		});
 
 		return this.optimize;
-	}
+	};
 
 	/**
 	 * Populates the gallery table
@@ -695,7 +695,7 @@ export default class galleryClass
 		this.table = table;
 
 		return table;
-	}
+	};
 
 	/**
 	 * Updating functions
@@ -714,7 +714,7 @@ export default class galleryClass
 
 			wrapper.style.setProperty('--width-list', `${width}px`);
 		}
-	}
+	};
 
 	/**
 	 * Constructs reverse search URLs
@@ -731,7 +731,7 @@ export default class galleryClass
 		});
 
 		return reverseObj;
-	}
+	};
 
 	/**
 	 * Adds image reverse search options
@@ -767,7 +767,7 @@ export default class galleryClass
 		this.container.querySelector(
 			':scope > div.galleryContent > div.media > div.wrapper > div.cover'
 		).append(container);
-	}
+	};
 
 	/**
 	 * Apply functions
@@ -870,7 +870,7 @@ export default class galleryClass
 
 			return true;
 		}
-	}
+	};
 
 	/* Checks if a list item is scrolled into view */
 	private isScrolledIntoView = (container: HTMLElement, element: HTMLElement): boolean =>
@@ -889,7 +889,7 @@ export default class galleryClass
 
 		return child.offset >= parent.scrolled &&
 			(child.offset + child.height) <= (parent.scrolled + parent.height);
-	}
+	};
 
 	/**
 	 * Calculates the navigational index
@@ -914,7 +914,7 @@ export default class galleryClass
 		}
 
 		return adjusted;
-	}
+	};
 
 	/**
 	 * Video functions
@@ -995,7 +995,7 @@ export default class galleryClass
 				return false;
 			}
 		}
-	}
+	};
 
 	/**
 	 * Shows an item (called on show, navigate etc.)
@@ -1314,7 +1314,7 @@ export default class galleryClass
 		};
 
 		display();
-	}
+	};
 
 	/**
 	 * Navigates the gallery
@@ -1343,7 +1343,7 @@ export default class galleryClass
 			return false;
 		}
 
-		let init = null, item = null;
+		let init = null;
 
 		const contentContainer: HTMLElement = this.container.querySelector(':scope > div.galleryContent');
 
@@ -1356,7 +1356,7 @@ export default class galleryClass
 			table: HTMLElement = list.querySelector('table'),
 			element: HTMLElementExtend = table.querySelector(`tr:nth-child(${index + 1})`);
 
-		item = this.items[index];
+		const item = this.items[index];
 
 		const encodedItemSource = this.encodeUrl(item.url);
 
@@ -1510,7 +1510,7 @@ export default class galleryClass
 
 			return true;
 		}
-	}
+	};
 
 	/**
 	 * Handles keypresses
@@ -1554,7 +1554,7 @@ export default class galleryClass
 		}
 
 		callback(this.data.keyPrevent.includes(key));
-	}
+	};
 
 	/**
 	 * Prepares a listener to be removed on gallery unbind
@@ -1567,7 +1567,7 @@ export default class galleryClass
 		this.data.boundEvents[id] = {
 			selector, events
 		};
-	}
+	};
 
 	/**
 	 * Unbinds gallery listeners (called on gallery hide)
@@ -1587,7 +1587,7 @@ export default class galleryClass
 		this.data.boundEvents = {};
 
 		eventHooks.trigger('galleryUnbound');
-	}
+	};
 
 	/**
 	 * Scrollbreak
@@ -1595,7 +1595,7 @@ export default class galleryClass
 	private scrollBreak = (): void =>
 	{
 		this.data.scrollbreak = false;
-	}
+	};
 
 	/**
 	 * Toggles the visibility of the list of items
@@ -1631,7 +1631,7 @@ export default class galleryClass
 		}
 
 		return !visible;
-	}
+	};
 
 	/**
 	 * Binds listeners (called on create, show etc.)
@@ -1918,7 +1918,7 @@ export default class galleryClass
 		eventHooks.trigger('galleryBound', true);
 
 		return this.container;
-	}
+	};
 
 	/* Construct gallery top bar items */
 	private barConstruct = (bar: HTMLElement): HTMLElement =>
@@ -1966,7 +1966,7 @@ export default class galleryClass
 		}));
 
 		return bar;
-	}
+	};
 
 	/**
 	 * Creates the gallery elements, populates the table etc.
@@ -2070,7 +2070,7 @@ export default class galleryClass
 					'width': `${width}px`
 				});
 			}
-		} catch (e: unknown) {
+		} catch {
 			client.gallery.listWidth = false;
 
 			cookies.set(CookieKey, JSON.stringify(client), {
@@ -2119,5 +2119,5 @@ export default class galleryClass
 		this.populateTable(this.items);
 
 		callback(true);
-	}
+	};
 }

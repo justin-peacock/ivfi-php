@@ -181,7 +181,7 @@ export class componentBind
 	unbind = () =>
 	{
 		eventHooks.unlisten(window, 'keydown', 'mainKeyDown');
-	}
+	};
 
 	/**
 	 * Bind events — Recalled on gallery close
@@ -238,5 +238,5 @@ export class componentBind
 		});
 
 		events.handleTopBarVisibility();
-	}
+	};
 }

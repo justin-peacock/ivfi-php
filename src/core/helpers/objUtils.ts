@@ -131,7 +131,7 @@ export const applyNested = (
  */
 export const objHas = (obj: object, path: string) =>
 {
-	let level: string = null;
+	let level: string;
 	let rest: Array<string> = [];
 
 	if(!path.includes('.'))
