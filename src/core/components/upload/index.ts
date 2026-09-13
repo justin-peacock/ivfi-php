@@ -18,21 +18,24 @@ import '../../../css/upload.scss';
 type TQueued = {
 	/** Absent for a row that reports something that was never sendable */
 	file?: File;
+	/**
+	 * The directory this file was dropped on, captured then rather than read
+	 * at send time: in single-page mode the location can move while a queue is
+	 * still running, and the rest of the batch would follow it
+	 */
+	target?: string;
 	row: HTMLElement;
 	bar: HTMLElement;
 	name: HTMLElement;
 	status: HTMLElement;
 };
 
-/**
- * The instance the window listeners answer to.
- *
- * Single-page navigation replaces the document with `document.write()` and
- * builds another component, but `window` and the listeners on it survive that.
- * Without this, every instance an earlier navigation left behind handles the
- * same drop, and one file is uploaded once per page the client has visited
- */
-let live: componentUpload = null;
+/** Where the live marker is kept, see `claim()` */
+const LIVE_KEY = '__ivfiUploadLive';
+
+interface IUploadWindow extends Window {
+	__ivfiUploadLive?: object;
+}
 
 /**
  * Drag and drop uploads into the directory currently being listed.
@@ -63,6 +66,9 @@ class componentUpload
 	/** Whether anything landed, so the listing is known to be out of date */
 	private wrote = false;
 
+	/** The directory the current batch was dropped on */
+	private target: string = null;
+
 	constructor()
 	{
 		this.settings = config.get('upload') || {};
@@ -72,19 +78,37 @@ class componentUpload
 			return this;
 		}
 
-		live = this;
-
+		this.claim();
 		this.bind();
 
 		return this;
 	}
 
 	/**
+	 * Marks this instance as the one drops belong to.
+	 *
+	 * Single-page navigation replaces the document with `document.write()` and
+	 * builds another component, but `window` and the listeners on it survive
+	 * that. Every instance an earlier navigation left behind would otherwise
+	 * handle the same drop, and one file would be uploaded once per page the
+	 * client has visited.
+	 *
+	 * The marker lives on `window` rather than in this module, because the
+	 * replacement document loads `main.js` again and that runs in a module
+	 * scope of its own: a variable here is one per bundle execution, so every
+	 * older bundle would still read itself as the live one
+	 */
+	private claim = (): void =>
+	{
+		(window as IUploadWindow)[LIVE_KEY] = this;
+	};
+
+	/**
 	 * Whether this instance is the one the current document built
 	 */
 	private isLive = (): boolean =>
 	{
-		return live === this;
+		return (window as IUploadWindow)[LIVE_KEY] === this;
 	};
 
 	/**
@@ -237,6 +261,26 @@ class componentUpload
 	};
 
 	/**
+	 * The name the endpoint would write, as far as the parts that decide
+	 * whether it is accepted.
+	 *
+	 * Kept in step with `uploadSafeName()`. Deriving the extension from the raw
+	 * name instead turns `holiday.jpg.` into an empty extension here while the
+	 * server trims the dot and accepts it, which refuses a file the endpoint
+	 * would have taken
+	 */
+	private sanitised = (name: string): string =>
+	{
+		const separator = Math.max(name.lastIndexOf('/'), name.lastIndexOf('\\'));
+		const base = separator === -1 ? name : name.slice(separator + 1);
+
+		/* eslint-disable-next-line no-control-regex */
+		return base.replace(/[\x00-\x1F\x7F]+/g, '')
+			.replace(/^[\s.]+/, '')
+			.replace(/[\s.]+$/, '');
+	};
+
+	/**
 	 * Why a file cannot be sent, or null when it can
 	 *
 	 * Only refuses what the server refuses. A rule that lives here alone would
@@ -248,7 +292,7 @@ class componentUpload
 		const extensions = this.settings.extensions || [];
 		const maximum = this.settings.maxSize || 0;
 
-		const parts = file.name.toLowerCase().split('.');
+		const parts = this.sanitised(file.name).toLowerCase().split('.');
 
 		if(parts.length < 2)
 		{
@@ -313,6 +357,11 @@ class componentUpload
 			return;
 		}
 
+		/* Where these files are bound for, fixed at the moment they were dropped */
+		const target = window.location.pathname;
+
+		this.target = target;
+
 		this.createPanel();
 		this.updateClose();
 
@@ -338,6 +387,8 @@ class componentUpload
 
 			const queued = this.createRow(file.name, file);
 			const rejection = this.rejection(file);
+
+			queued.target = target;
 
 			if(rejection !== null)
 			{
@@ -416,7 +467,8 @@ class componentUpload
 			return;
 		}
 
-		if(this.wrote)
+		if(this.wrote && (this.target === null
+			|| this.target === window.location.pathname))
 		{
 			window.location.reload();
 
@@ -545,7 +597,7 @@ class componentUpload
 			/* The queue has drained: show the listing the uploads are missing from */
 			if(this.wrote && this.settled())
 			{
-				setTimeout(() => window.location.reload(), 600);
+				setTimeout(() => this.refresh(), 600);
 			}
 
 			return;
@@ -559,6 +611,32 @@ class componentUpload
 			this.busy = false;
 			this.next();
 		});
+	};
+
+	/**
+	 * Reloads once the queue really is finished with.
+	 *
+	 * Checked again rather than trusted from when the timer was set: a drop
+	 * arriving inside the delay starts the queue again, and reloading over it
+	 * aborts the request in flight and hides whatever it was about to report
+	 */
+	private refresh = (): void =>
+	{
+		if(this.busy || this.queue.length > 0 || !this.settled())
+		{
+			return;
+		}
+
+		/**
+		 * In single-page mode the listing can have moved on since the drop. The
+		 * files went where they were dropped, so there is nothing here to show
+		 */
+		if(this.target !== null && this.target !== window.location.pathname)
+		{
+			return;
+		}
+
+		window.location.reload();
 	};
 
 	/**
@@ -667,11 +745,11 @@ class componentUpload
 		});
 
 		/**
-		 * Posted back to the directory being viewed, which is the directory
-		 * the file is written into: the server resolves the target from the
-		 * request path it already validated, so there is no path to send
+		 * Posted back to the directory the file was dropped on, which is the
+		 * directory it is written into: the server resolves the target from
+		 * the request path it already validated, so there is no path to send
 		 */
-		request.open('POST', window.location.pathname, true);
+		request.open('POST', queued.target || window.location.pathname, true);
 		request.setRequestHeader('Accept', 'application/json');
 		request.send(body);
 	};

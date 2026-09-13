@@ -327,22 +327,40 @@ final class UploadTest extends IndexerTestCase
     }
 
     /**
-     * The no-overwrite rule is enforced by the operation that claims the name,
-     * not by the check before it, so a name taken between the two is refused
-     * rather than replaced.
+     * The name is claimed by replacing the directory entry, not by writing
+     * through whatever the name currently points at.
+     *
+     * Proven through a second hard link to the original file: `rename()` swaps
+     * the entry, so the witness keeps the old contents, while anything that
+     * wrote through the path would change both. That difference is also what
+     * decides whether a symlink at the target is replaced or followed, and
+     * unlike the concurrent case it is deterministic.
+     *
+     * The window between two racing requests is not covered here. Reproducing
+     * it needs either real concurrency, which makes the test a coin flip, or a
+     * hook in the endpoint that exists only for the test.
      */
-    public function testANameTakenAfterTheCheckIsStillNotOverwritten(): void
+    public function testTheNameIsClaimedByReplacingTheDirectoryEntry(): void
     {
-        $server = $this->serve();
+        $server = $this->serve(['overwrite' => true]);
         $token = $this->signIn($server);
 
-        /* Two uploads of one name: exactly one may land */
-        [, $first] = $this->upload($server, $token, 'race.jpg', 'first');
-        [, $second] = $this->upload($server, $token, 'race.jpg', 'second');
+        $target = $this->root() . '/existing.jpg';
+        $witness = $this->root() . '/witness.jpg';
 
-        $this->assertTrue($first['ok'] ?? false);
-        $this->assertFalse($second['ok'] ?? false);
-        $this->assertSame('first', file_get_contents($this->root() . '/race.jpg'));
+        if (!@link($target, $witness)) {
+            $this->markTestSkipped('The filesystem does not support hard links');
+        }
+
+        [, $payload] = $this->upload($server, $token, 'existing.jpg', 'replacement');
+
+        $this->assertTrue($payload['ok'] ?? false);
+        $this->assertSame('replacement', file_get_contents($target));
+        $this->assertSame(
+            'original',
+            file_get_contents($witness),
+            'the upload wrote through the name instead of replacing the entry'
+        );
     }
 
     /**
@@ -552,29 +570,93 @@ final class UploadTest extends IndexerTestCase
      * a shared host another application can have left a `user` key in it. The
      * sign-in state is taken from this script's own `authenticate()` rather
      * than from whatever is in `$_SESSION`, so that is not a sign-in here.
+     *
+     * The foreign session is written straight to `session.save_path` and its
+     * cookie sent by hand. Starting an empty one instead would leave no `user`
+     * key anywhere, and the regression this guards against would sail past.
      */
     public function testAnAmbientSessionIsNotASignIn(): void
     {
         $fixture = new Fixture('upload-ambient');
         $fixture->config(['upload' => ['enabled' => true]]);
 
-        $server = new Server($fixture, ['session.auto_start' => '1']);
+        /* Kept inside the fixture so it is torn down with it */
+        $sessions = $fixture->root() . '/sessions';
+
+        if (!mkdir($sessions, 0700, true) && !is_dir($sessions)) {
+            $this->markTestSkipped('Could not create a session directory');
+        }
+
+        $id = 'ivfiambient' . bin2hex(random_bytes(4));
+
+        /* PHP's own session serialization: another application's signed-in user */
+        file_put_contents(
+            $sessions . '/sess_' . $id,
+            sprintf('user|s:%d:"%s";seen|i:%d;', strlen(self::USER), self::USER, time())
+        );
+
+        $server = new Server($fixture, [
+            'session.auto_start' => '1',
+            'session.save_path'  => $sessions,
+        ]);
 
         $this->servers[] = $server;
         $this->fixtures[] = $fixture;
 
-        $config = $this->jsConfig($server->request('/'));
+        $cookie = ['Cookie' => 'PHPSESSID=' . $id];
+
+        /* The session really is being adopted, or the test proves nothing */
+        $this->assertSame(
+            self::USER,
+            $this->ambientUser($server, $cookie),
+            'the foreign session was never adopted, so this covers nothing'
+        );
+
+        $config = $this->jsConfig($server->request('/', $cookie));
 
         $this->assertFalse(
             $config['upload']['enabled'] ?? false,
-            'an auto-started session was read as a sign-in'
+            'a user key left by another application was read as a sign-in'
         );
 
-        [$response, $payload] = $this->upload($server, 'anything', 'holiday.jpg');
+        $response = $server->request('/', $cookie, [
+            'ivfi_action' => 'upload',
+            'ivfi_csrf'   => 'anything',
+        ], [
+            'ivfi_file' => ['name' => 'holiday.jpg', 'contents' => 'x'],
+        ]);
 
         $this->assertSame('403 Forbidden', $response->header('Status'));
-        $this->assertFalse($payload['ok'] ?? false);
+        $this->assertFalse(json_decode($response->body, true)['ok'] ?? false);
         $this->assertFileDoesNotExist($fixture->root() . '/holiday.jpg');
+    }
+
+    /**
+     * The `user` key PHP read back out of the session file for that request.
+     *
+     * Read from the file rather than from the page, which deliberately says
+     * nothing about it: if PHP never adopted the session the file keeps its
+     * original contents anyway, so this distinguishes "not treated as a
+     * sign-in" from "never seen at all".
+     *
+     * @param array<string, string> $cookie
+     */
+    private function ambientUser(Server $server, array $cookie): ?string
+    {
+        $server->request('/', $cookie);
+
+        $id = explode('=', $cookie['Cookie'], 2)[1];
+        $path = end($this->fixtures)->root() . '/sessions/sess_' . $id;
+        $contents = @file_get_contents($path);
+
+        if ($contents === false) {
+            return null;
+        }
+
+        /* `session.auto_start` rewrites the file on shutdown, keeping the key */
+        preg_match('/user\|s:\d+:"([^"]*)";/', $contents, $m);
+
+        return $m[1] ?? null;
     }
 
     /**
@@ -618,6 +700,23 @@ final class UploadTest extends IndexerTestCase
         $token = $this->signIn($server);
 
         [, $payload] = $this->upload($server, $token, "holiday\n.jpg", 'jpeg-bytes');
+
+        $this->assertTrue($payload['ok'] ?? false);
+        $this->assertSame('holiday.jpg', $payload['file']['name'] ?? null);
+        $this->assertFileExists($this->root() . '/holiday.jpg');
+    }
+
+    /**
+     * A trailing dot is trimmed and the file accepted, which is the behaviour
+     * the client has to mirror: deriving the extension from the raw name gives
+     * an empty one, and the drop would be refused for a file the endpoint takes.
+     */
+    public function testATrailingDotIsTrimmedRatherThanRefused(): void
+    {
+        $server = $this->serve();
+        $token = $this->signIn($server);
+
+        [, $payload] = $this->upload($server, $token, 'holiday.jpg.', 'jpeg-bytes');
 
         $this->assertTrue($payload['ok'] ?? false);
         $this->assertSame('holiday.jpg', $payload['file']['name'] ?? null);

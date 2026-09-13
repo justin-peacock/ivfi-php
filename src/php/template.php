@@ -1945,9 +1945,34 @@ function handleUpload($indexer, $config, $available)
    * `move_uploaded_file()` carries the temporary file's mode over, which
    * follows the process umask and can leave the file unreadable to the very
    * server that is meant to serve it back. Set here rather than after the
-   * rename, so the file is never readable at its real name with the wrong mode
+   * rename, so the file never sits at its real name with the wrong mode.
+   *
+   * A failure is not by itself fatal: filesystems that carry no Unix modes at
+   * all (a FAT or CIFS mount, say) refuse every `chmod()` while serving the
+   * file perfectly well, and discarding a good upload there would be worse
+   * than the problem. What matters is the outcome, so that is what is checked
    */
-  @chmod($staged, 0644);
+  if(!@chmod($staged, 0644))
+  {
+    if(!is_readable($staged))
+    {
+      @unlink($staged);
+
+      error_log(sprintf(
+        'IVFi: an upload into %s could not be made readable', $directory
+      ));
+
+      uploadRespond(500, [
+        'ok' => false,
+        'error' => 'The file could not be stored readably.'
+      ]);
+    }
+
+    error_log(sprintf(
+      'IVFi: could not set the mode on an upload into %s, which is readable anyway',
+      $directory
+    ));
+  }
 
   if($overwrite)
   {
