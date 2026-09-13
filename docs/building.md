@@ -92,7 +92,8 @@ older versions.
 ## Staged TypeScript work
 
 `strict` is not on yet. The flags were measured individually against the current
-source so the remaining work is a known quantity rather than a guess:
+source on TypeScript 5.9, so the remaining work is a known quantity rather than
+a guess:
 
 | Flag | Errors |
 |------|--------|
@@ -101,14 +102,13 @@ source so the remaining work is a known quantity rather than a guess:
 | `strictFunctionTypes` | 10 |
 | `noImplicitThis` | 104 |
 | `noImplicitAny` | 233 |
-| `strictNullChecks` | not measurable yet |
+| `strictNullChecks` | 805 |
+| `strict` (all of the above together) | 1122 |
 
-`strictNullChecks`, and therefore `strict` as a whole, cannot be assessed on
-TypeScript 4.8: the compiler crashes with an internal error rather than
-reporting diagnostics. **TypeScript has to be upgraded before strict mode can
-even be scoped**, so that is the first step, not the last.
+`strictNullChecks` could not be measured before the compiler was upgraded,
+because TypeScript 4.8 crashed on this source with an internal error rather
+than reporting diagnostics. It is by far the largest item.
 
-A sensible order after that is `noImplicitReturns`, `strictFunctionTypes`,
+A sensible order is `noImplicitReturns`, `strictFunctionTypes`,
 `noImplicitThis`, `noImplicitAny`, then `strictNullChecks`, one flag per change
 so each one is reviewable.
-

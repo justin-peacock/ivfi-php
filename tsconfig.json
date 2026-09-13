@@ -10,9 +10,8 @@
         // whose newer releases use syntax this TypeScript cannot parse.
         "types": ["modernizr"],
         // Enabled because it already passes. The rest of the strict family is
-        // staged work, see docs/building.md: noImplicitAny is 233 errors and
-        // noImplicitThis 104, and strictNullChecks cannot even be measured
-        // until TypeScript is upgraded, because 4.8 crashes on it here.
+        // staged work, see docs/building.md: noImplicitAny is 233 errors,
+        // noImplicitThis 104 and strictNullChecks 805 on TypeScript 5.9.
         "strictBindCallApply": true,
         "sourceMap": true,
         "allowSyntheticDefaultImports": true,
