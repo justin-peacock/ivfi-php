@@ -61,7 +61,7 @@ The releases and individual builds are available [here](https://git.five.sh/ivfi
 # Features
 
 ### **Authentication**
-> It includes support for HTTP authentication, providing some added security for your directories.
+> Directories can be gated behind a sign-in form, with hashed credentials, a session cookie and lockout after repeated failures.
 ### **Gallery Mode**
 > A gallery mode that allows you to view images and videos from the current directory in one place, as well as the ability to download files and perform reverse image searches.
 ### **Hover Previews**
