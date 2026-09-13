@@ -82,7 +82,7 @@ The releases and individual builds are available [here](https://git.five.sh/ivfi
 ### **And much more ...**
 + :clock12: The dates will be adjusted to match the time zone of the client.
 + :arrow_up_down: Client-defined sorting preferences are stored persistently.
-+ :art: Support for custom themes.
++ :art: A light and dark design built on Tailwind CSS and shadcn tokens, with support for custom themes.
 + :mag: Server-side filtering which can help you hide specific files or folders.
 + :link: Navigating between folders is made easy with the clickable paths.
 + :gear: The client has the option to personalize their settings through the menu.
