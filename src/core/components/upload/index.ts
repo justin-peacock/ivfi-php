@@ -457,6 +457,76 @@ class componentUpload
 	};
 
 	/**
+	 * Asks for a name and creates a directory in the listing being viewed.
+	 *
+	 * Public, because the menu item is what reaches it: this component owns the
+	 * write endpoint and its token, and a second place assembling that request
+	 * would be a second place to keep in step with the server
+	 */
+	public createDirectory = (): void =>
+	{
+		if(!this.settings.enabled || !this.settings.directories)
+		{
+			return;
+		}
+
+		const name = window.prompt('Name for the new folder');
+
+		/* Cancelled, rather than confirmed with nothing in it */
+		if(name === null)
+		{
+			return;
+		}
+
+		if(name.trim() === '')
+		{
+			window.alert('A folder needs a name.');
+
+			return;
+		}
+
+		const fields = this.settings.fields || {};
+		const body = new URLSearchParams();
+
+		body.append(fields.action, this.settings.directoryAction);
+		body.append(fields.token, this.settings.token);
+		body.append(fields.name, name);
+
+		fetch(window.location.pathname, {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/x-www-form-urlencoded',
+				'Accept': 'application/json'
+			},
+			body: body.toString()
+		}).then((response) => response.json().then((payload) => ({
+			ok: response.ok, payload
+		}))).then(({ ok, payload }) =>
+		{
+			if(ok && payload && payload.ok)
+			{
+				/* The listing does not have it yet, so it is fetched again */
+				window.location.reload();
+
+				return;
+			}
+
+			window.alert(
+				payload && payload.error ? payload.error : 'The folder could not be created.'
+			);
+		}).catch((error) =>
+		{
+			log('upload', error);
+
+			/**
+			 * Anything but the JSON this endpoint answers with means the request
+			 * never reached it, a session that expired being the likeliest
+			 */
+			window.alert('The folder could not be created. Reload the page and try again.');
+		});
+	};
+
+	/**
 	 * Creates the panel the queue is reported in
 	 */
 	private createPanel = (): void =>

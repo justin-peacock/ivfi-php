@@ -53,9 +53,13 @@ export type TConfigUpload = {
 	enabled?: boolean;
 	token?: string;
 	action?: string;
+	/** Whether directories may be created as well as files uploaded */
+	directories?: boolean;
+	directoryAction?: string;
 	fields?: {
 		action?: string;
 		file?: string;
+		name?: string;
 		token?: string;
 	};
 	extensions?: Array<string>;

@@ -32,6 +32,9 @@
 		},
 		"settings" : {
 			"text" : "[Open] Settings"
+		},
+		"directory" : {
+			"text" : "[New] Folder"
 		}
 	},
 	"reverseSearch" : {

@@ -51,6 +51,7 @@ $config = [
      *     'extensions' => ['jpg', 'png', 'mp4'], // true = the media extensions below
      *     'max_size' => 104857600,               // bytes, false follows php.ini
      *     'overwrite' => false,
+     *     'directories' => true,                 // allow creating folders too
      *     'restrict' => '/^\/(incoming)\/?/i'   // optional, only these paths
      *   ]
      */
@@ -69,6 +70,13 @@ $config = [
       'max_size' => false,
       /* Whether an upload may replace a file that is already there */
       'overwrite' => false,
+      /**
+       * Whether directories may be created as well as files uploaded.
+       *
+       * Follows the same gate as an upload: it writes into the served tree,
+       * so it is offered to the same clients on the same paths
+       */
+      'directories' => true,
       /* Optional pattern, so only some of the authenticated paths accept uploads */
       'restrict' => false
     ],
@@ -643,8 +651,10 @@ define('AUTH_PARAM_LOGOUT', 'ivfi_logout');
 /** Field names used by the upload endpoint */
 define('UPLOAD_FIELD_ACTION', 'ivfi_action');
 define('UPLOAD_FIELD_FILE', 'ivfi_file');
-/** Value of `UPLOAD_FIELD_ACTION` that marks a request as an upload */
+define('UPLOAD_FIELD_NAME', 'ivfi_name');
+/** Values of `UPLOAD_FIELD_ACTION` that mark what a request is asking for */
 define('UPLOAD_ACTION', 'upload');
+define('UPLOAD_ACTION_DIRECTORY', 'directory');
 /**
  * Room left for the rest of a multipart body when deriving a size limit from
  * `post_max_size`: the boundaries, the part headers and the other fields
@@ -1726,6 +1736,181 @@ function uploadIsAvailable($config, $authenticated)
   }
 
   return true;
+}
+
+/**
+ * Whether directories may be created
+ *
+ * @param Array    $config     Configuration values
+ * @param Boolean  $available  Whether this request may write here at all
+ *
+ * @return Boolean
+ */
+function uploadDirectoriesAreAvailable($config, $available)
+{
+  return $available
+    && (!isset($config['upload']['directories'])
+      || !empty($config['upload']['directories']));
+}
+
+/**
+ * Why a sanitised directory name cannot be used
+ *
+ * A directory carries no extension to check against an allowlist, so the rule
+ * is the other way round to a file's: anything is acceptable except a name the
+ * server treats as something other than a directory.
+ *
+ * @param String  $name  A name that has been through `uploadSafeName()`
+ *
+ * @return String  NULL when the name is fine
+ */
+function uploadDirectoryRejection($name)
+{
+  foreach(explode('.', strtolower($name)) as $index => $segment)
+  {
+    /* The part before the first dot is the name itself, not an extension */
+    if($index === 0)
+    {
+      continue;
+    }
+
+    /**
+     * A directory is not executed, but one named `reports.php` is still routed
+     * to the interpreter by a typical handler mapping, which answers a request
+     * to browse it with a 404 rather than a listing. Refused at the point it is
+     * created, where it can still be given a different name.
+     *
+     * Every segment is checked, not only the last, for the same reason the
+     * upload path checks them: a handler mapping can match any of them, so
+     * `reports.php.stuff` is routed the same way `reports.php` is
+     */
+    if(uploadIsRefusedExtension($segment))
+    {
+      return 'That name carries an extension the server treats specially.';
+    }
+  }
+
+  return NULL;
+}
+
+/**
+ * Handles a request to create a directory, and returns otherwise
+ *
+ * @param Indexer  $indexer    Indexer class
+ * @param Array    $config     Configuration values
+ * @param Boolean  $available  Whether this request may write here
+ *
+ * @return void
+ */
+function handleDirectory($indexer, $config, $available)
+{
+  if(!uploadIsEnabled($config)
+    || (isset($_SERVER['REQUEST_METHOD']) ? $_SERVER['REQUEST_METHOD'] : 'GET') !== 'POST'
+    || !isset($_POST[UPLOAD_FIELD_ACTION])
+    || $_POST[UPLOAD_FIELD_ACTION] !== UPLOAD_ACTION_DIRECTORY)
+  {
+    return;
+  }
+
+  if(!uploadDirectoriesAreAvailable($config, $available))
+  {
+    uploadRespond(403, [
+      'ok' => false,
+      'error' => 'Directories cannot be created here.'
+    ]);
+  }
+
+  $token = isset($_POST[AUTH_FIELD_CSRF]) ? (string) $_POST[AUTH_FIELD_CSRF] : '';
+
+  if(empty($_SESSION['csrf']) || !hash_equals($_SESSION['csrf'], $token))
+  {
+    uploadRespond(403, [
+      'ok' => false,
+      'error' => 'Your session expired. Reload the page and try again.'
+    ]);
+  }
+
+  $name = isset($_POST[UPLOAD_FIELD_NAME]) && is_string($_POST[UPLOAD_FIELD_NAME])
+    ? uploadSafeName($_POST[UPLOAD_FIELD_NAME])
+    : '';
+
+  if($name === '')
+  {
+    uploadRespond(400, [
+      'ok' => false,
+      'error' => 'That name cannot be used.'
+    ]);
+  }
+
+  $rejection = uploadDirectoryRejection($name);
+
+  if($rejection !== NULL)
+  {
+    uploadRespond(400, ['ok' => false, 'error' => $rejection]);
+  }
+
+  $directory = $indexer->path;
+
+  /* The same containment the upload path checks, for the same reason */
+  if(!is_dir($directory)
+    || !Helpers::isAboveCurrent($directory, BASE_PATH))
+  {
+    uploadRespond(403, [
+      'ok' => false,
+      'error' => 'That directory cannot be written to.'
+    ]);
+  }
+
+  $directory = rtrim($directory, DIRECTORY_SEPARATOR);
+  $target = $directory . DIRECTORY_SEPARATOR . $name;
+
+  /* A sanitised name resolves inside the directory; anything else is a bug here */
+  if(dirname($target) !== $directory)
+  {
+    uploadRespond(400, [
+      'ok' => false,
+      'error' => 'That name cannot be used.'
+    ]);
+  }
+
+  if(!is_writable($directory))
+  {
+    error_log(sprintf('IVFi: cannot create a directory in %s, which is not writable', $directory));
+
+    uploadRespond(500, [
+      'ok' => false,
+      'error' => 'The server cannot write to this directory.'
+    ]);
+  }
+
+  /**
+   * `mkdir()` is the whole operation: it creates the name or fails because
+   * something already holds it, in one step. No staging or separate existence
+   * check, which is what the file path needs only because a file arrives as
+   * contents that have to be put somewhere first
+   */
+  if(!@mkdir($target, 0755))
+  {
+    if(file_exists($target) || is_link($target))
+    {
+      uploadRespond(409, [
+        'ok' => false,
+        'error' => 'Something with that name is already here.'
+      ]);
+    }
+
+    error_log(sprintf('IVFi: could not create a directory in %s', $directory));
+
+    uploadRespond(500, [
+      'ok' => false,
+      'error' => 'The directory could not be created.'
+    ]);
+  }
+
+  uploadRespond(201, [
+    'ok' => true,
+    'directory' => ['name' => $name]
+  ]);
 }
 
 /**
@@ -3684,6 +3869,7 @@ $uploadAvailable = uploadIsAvailable($config, $authenticated);
  * it is
  */
 handleUpload($indexer, $config, $uploadAvailable);
+handleDirectory($indexer, $config, $uploadAvailable);
 
 /**
  * The page carries the form token so that an upload can prove it came from
@@ -4126,9 +4312,12 @@ function constructJsConfig($config, $sorting, $timestamp, $bust, $theme, $upload
       'enabled' => true,
       'token' => isset($_SESSION['csrf']) ? $_SESSION['csrf'] : '',
       'action' => UPLOAD_ACTION,
+      'directories' => uploadDirectoriesAreAvailable($config, true),
+      'directoryAction' => UPLOAD_ACTION_DIRECTORY,
       'fields' => [
         'action' => UPLOAD_FIELD_ACTION,
         'file' => UPLOAD_FIELD_FILE,
+        'name' => UPLOAD_FIELD_NAME,
         'token' => AUTH_FIELD_CSRF
       ],
       'extensions' => uploadAllowedExtensions(
