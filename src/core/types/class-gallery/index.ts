@@ -64,8 +64,8 @@ export type TGalleryDataActive = {
 	/** The gallery's own inline style overrides, saved so they can be
 	 * restored when the gallery closes */
 	body?: {
-		'max-height'?: string;
-		overflow?: string;
+		'max-height': string;
+		overflow: string;
 	};
 
 	selected?: {

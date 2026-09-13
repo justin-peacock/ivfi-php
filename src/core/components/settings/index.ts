@@ -360,7 +360,7 @@ options.set = (setData: Record<string, any>, client: TUserStorage) =>
 	client = client || user.get();
 
 	/**
-	 * `TUserClient`'s own shape is precise, but the section and option
+	 * `TUserStorage`'s own shape is precise, but the section and option
 	 * names applied here come from the caller's markup (`data-key` and
 	 * `name` attributes), not from a fixed list, so this view is widened
 	 * to match how it is actually used below
@@ -546,8 +546,8 @@ export class componentSettings
 
 	private boundEvents: {
 		[id: string]: {
-			selector?: any;
-			events?: Array<string>;
+			selector: any;
+			events: Array<string>;
 		};
 	};
 

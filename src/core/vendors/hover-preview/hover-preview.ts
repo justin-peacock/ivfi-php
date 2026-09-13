@@ -117,4 +117,4 @@ function setup(this: HoverPreviewInstance)
 }
 
 // export default
-export default (element: HTMLElement, options: TPreviewOptions) => new hoverPreview(element, options)
+export default (element: HTMLElement, options: TPreviewOptions = {}) => new hoverPreview(element, options)

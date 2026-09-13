@@ -69,9 +69,9 @@ function onEnter(this: HoverPreviewInstance, e: MouseEvent)
 		{
 			// wait for media to show its dimensions
 			(this.data.type === 0 ? loadImage : loadVideo)
-			.call(this, this.data.src, function(e: false | HoverPreviewMedia, dimensions: [number, number])
+			.call(this, this.data.src, function(e: false | HoverPreviewMedia, dimensions?: [number, number])
 			{
-				if(!e)
+				if(!e || !dimensions)
 				{
 					if(_this.options.cursor)
 					{
