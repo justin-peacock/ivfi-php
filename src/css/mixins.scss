@@ -9,7 +9,7 @@
     "isDesktop": "(min-width: #{map.get(variables.$breakpoints, "mobile-max-width")})"
   );
 
-  @return map-get($condition-map, $c);
+  @return map.get($condition-map, $c);
 }
 
 /* Media query mixin */
