@@ -196,7 +196,8 @@ repaired.
 ### Creating folders
 
 A signed-in client can also create a folder in the directory it is viewing,
-from the `[New] Folder` item in the menu. It follows the same gate as an upload
+from the `+ New folder` button beside the path or the `[New] Folder` item in the
+menu. It follows the same gate as an upload
 and is switched off with `'directories' => false`, which leaves uploading on.
 
 The name goes through the same handling as an uploaded file's: reduced to one
