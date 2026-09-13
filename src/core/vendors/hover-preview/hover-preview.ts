@@ -8,6 +8,10 @@ import {
 	mousemove
 } from './events';
 
+import {
+	HoverPreviewInstance
+} from './utils';
+
 const defaults = {
 	delay: 75,
 	encodeAll: false,
@@ -55,7 +59,7 @@ class hoverPreview
 	}
 }
 
-function setup()
+function setup(this: HoverPreviewInstance)
 {
 	// set options and data
 	this.options = {...defaults, ...this.options};

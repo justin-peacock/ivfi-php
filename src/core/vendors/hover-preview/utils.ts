@@ -1,3 +1,18 @@
+/**
+ * The `this` context threaded through this module (and through
+ * `hover-preview.ts` and `events.ts`) is the preview instance created in
+ * `hover-preview.ts`'s `setup()`. Its properties are set dynamically,
+ * outside any one function, and are read and written across all three
+ * files, so there is no single place that "owns" the shape.
+ *
+ * Giving it a precise type is real work, and belongs with the broader
+ * `noImplicitAny` pass staged in docs/building.md, alongside the rest of
+ * this module's untyped parameters. Here `this` only needs an explicit
+ * annotation to satisfy `noImplicitThis`, so it is given the type it
+ * already had implicitly.
+ */
+export type HoverPreviewInstance = any;
+
 function getLeft(left, eWidth, offsetX)
 {
 	if(left)
@@ -66,7 +81,7 @@ export function getMove()
 	};
 }
 
-export function getType()
+export function getType(this: HoverPreviewInstance)
 {
 	if(this.data.force)
 	{
@@ -112,7 +127,7 @@ export function createContainer()
 	return container;
 }
 
-function encodeUrl(input)
+function encodeUrl(this: HoverPreviewInstance, input)
 {
 	return this.options.encodeAll ? input.replace('#', '%23').replace('?', '%3F') : encodeURI(input);
 }
@@ -150,7 +165,7 @@ function isAudible(video)
     return false;
 }
 
-export function loadImage(src, callback)
+export function loadImage(this: HoverPreviewInstance, src, callback)
 {
 	var _this = this;
 
@@ -200,7 +215,7 @@ export function loadImage(src, callback)
 	}, 30);
 }
 
-export function loadVideo(src, callback)
+export function loadVideo(this: HoverPreviewInstance, src, callback)
 {
 	var _this = this;
 

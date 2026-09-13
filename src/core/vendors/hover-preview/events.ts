@@ -2,10 +2,11 @@ import {
 	loadImage,
 	loadVideo,
 	createContainer,
-	getType
+	getType,
+	HoverPreviewInstance
 } from './utils';
 
-function setOffset(e)
+function setOffset(this: HoverPreviewInstance, e)
 {
 	this.data.offset = {
 		x : e.clientX,
@@ -13,7 +14,7 @@ function setOffset(e)
 	};
 }
 
-function onEnter(e)
+function onEnter(this: HoverPreviewInstance, e)
 {
 	let target = e.target;
 
@@ -103,7 +104,7 @@ function onEnter(e)
 	}
 }
 
-function update()
+function update(this: HoverPreviewInstance)
 {
 	this.updater(
 		this.data.left,
@@ -116,7 +117,7 @@ function update()
 	});
 }
 
-export function mousemove(e)
+export function mousemove(this: HoverPreviewInstance, e)
 {
 	setOffset.call(this, e);
 
@@ -128,7 +129,7 @@ export function mousemove(e)
 	update.call(this);
 }
 
-export function mouseenter(e)
+export function mouseenter(this: HoverPreviewInstance, e)
 {
 	this.active = true;
 
@@ -153,7 +154,7 @@ export function mouseenter(e)
 }
 
 // destroy preview container
-export function mouseleave(e)
+export function mouseleave(this: HoverPreviewInstance, e)
 {
 	let timestamp = null;
 
