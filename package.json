@@ -56,6 +56,9 @@
   },
   "author": "emy",
   "license": "GPL-3.0",
+  "engines": {
+    "node": ">=22"
+  },
   "bugs": {
     "url": "https://github.com/sixem/ivfi-php/issues"
   },
