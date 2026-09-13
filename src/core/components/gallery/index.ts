@@ -25,11 +25,15 @@ export class componentGallery
 		source: MComponentGallery.TOptions,
 		values: Array<any>): MComponentGallery.TOptions =>
 	{
+		/* `source`'s own shape is fixed; the keys applied here come from
+		 * the caller's own list of [key, configPath] pairs, not from it */
+		const dynSource = source as Record<string, any>;
+
 		values.forEach((data: [string, string]) =>
 		{
 			const key = data.shift();
 
-			source[key] = config.get(data[0]);
+			dynSource[key] = config.get(data[0]);
 		});
 
 		return source;
@@ -116,8 +120,9 @@ export class componentGallery
 			['scrollInterval', 'gallery.scrollInterval']
 		]);
 
-		/* Set defaults */
-		const defaults = {
+		/* Set defaults: each value is a [section, option] path into
+		 * `config.data` for that gallery setting */
+		const defaults: Record<string, [string, string]> = {
 			reverseOptions : ['gallery', 'reverseOptions'],
 			fitContent : ['gallery', 'fitContent'],
 			autoplay : ['gallery', 'autoplay'],
@@ -130,7 +135,9 @@ export class componentGallery
 				options,
 				key,
 				client,
-				(config.data).gallery[defaults[key][1]],
+				/* `config.data.gallery`'s own shape is fixed; the option
+				 * name being read here is whatever this loop is on */
+				(config.data.gallery as Record<string, any>)[defaults[key][1]],
 				defaults[key][0],
 				defaults[key][1]
 			);

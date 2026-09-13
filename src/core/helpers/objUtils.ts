@@ -1,7 +1,7 @@
 /**
  * Checks an object for the existance nested path
  */
-export const checkNestedPath = (obj: object, path: string | Array<string>): boolean =>
+export const checkNestedPath = (obj: Record<string, any>, path: string | Array<string>): boolean =>
 {
 	path = Array.isArray(path) ? path: path.split('.');
 
@@ -21,7 +21,7 @@ export const checkNestedPath = (obj: object, path: string | Array<string>): bool
 /**
  * Checks an object for a nested value
  */
-export const checkNested = (obj: object, ...args: Array<string>): boolean =>
+export const checkNested = (obj: Record<string, any>, ...args: Array<string>): boolean =>
 {
 	for(let i = 0; i < args.length; i++)
 	{
@@ -39,7 +39,7 @@ export const checkNested = (obj: object, ...args: Array<string>): boolean =>
 /**
  * Sets an object value using a path
  */
-export const setNestedPath = (obj: object, path: string | Array<string>, value: any): boolean =>
+export const setNestedPath = (obj: Record<string, any>, path: string | Array<string>, value: any): boolean =>
 {
 	path = Array.isArray(path) ? path: path.split('.');
 
@@ -68,7 +68,7 @@ export const setNestedPath = (obj: object, path: string | Array<string>, value: 
 /**
  * Retrieves an object value using path
  */
-export const getNestedPath = (obj: object, path: string | Array<string>, fallback: any): any =>
+export const getNestedPath = (obj: Record<string, any>, path: string | Array<string>, fallback: any): any =>
 {
 	path = Array.isArray(path) ? path: path.split('.');
 
@@ -88,7 +88,7 @@ export const getNestedPath = (obj: object, path: string | Array<string>, fallbac
 /**
  * Retrieves an object value using path
  */
-export const getNested = function (obj: object, fallback: any, ...args: Array<string>): any
+export const getNested = function (obj: Record<string, any>, fallback: any, ...args: Array<string>): any
 {
 	for(let i = 0; i < args.length; i++)
 	{
@@ -107,9 +107,9 @@ export const getNested = function (obj: object, fallback: any, ...args: Array<st
  * Applies a nested value to an object key
  */
 export const applyNested = (
-	dest: object,
+	dest: Record<string, any>,
 	key: string,
-	origin: object,
+	origin: Record<string, any>,
 	fallback: any,
 	...nested: Array<string>
 ): any =>
@@ -129,7 +129,7 @@ export const applyNested = (
 /**
  * Tests the existance of a path within an object
  */
-export const objHas = (obj: object, path: string) =>
+export const objHas = (obj: Record<string, any>, path: string): boolean =>
 {
 	let level: string;
 	let rest: Array<string> = [];

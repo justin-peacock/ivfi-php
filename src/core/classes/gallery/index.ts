@@ -55,14 +55,17 @@ export default class galleryClass
 	constructor(items: Array<TGalleryTableItem>, options: object = {})
 	{
 		/* Get default values */
-		const defaults = this.setDefaults();
+		const defaults = this.setDefaults() as Record<string, any>;
+
+		/* Both are option bags with the same, non-fixed set of keys */
+		const dynOptions = options as Record<string, any>;
 
 		/* Override any default values passed as an option */
 		Object.keys(defaults).forEach((key) =>
 		{
 			if(!Object.prototype.hasOwnProperty.call(options, key))
 			{
-				options[key] = defaults[key];
+				dynOptions[key] = defaults[key];
 			}
 		});
 
@@ -284,7 +287,8 @@ export default class galleryClass
 
 		height = ['top', 'bottom'].map((side) =>
 		{
-			return parseInt(style['margin-' + side], 10);
+			/* See the identical cast in DOM.style.set() for why this is safe */
+			return parseInt((style as unknown as Record<string, string>)['margin-' + side], 10);
 		}).reduce((total, side) =>
 		{
 			return total + side;
@@ -397,7 +401,8 @@ export default class galleryClass
 			this.isVisible = true;
 
 			this.data.body = {
-				'max-height': body.style['max-height'],
+				/* See the identical cast in DOM.style.set() for why this is safe */
+				'max-height': (body.style as unknown as Record<string, string>)['max-height'],
 				'overflow': body.style.overflow
 			};
 
@@ -719,11 +724,11 @@ export default class galleryClass
 	/**
 	 * Constructs reverse search URLs
 	 */
-	private getReverseOptions = (url: string): object =>
+	private getReverseOptions = (url: string): Record<string, string> =>
 	{
 		url = this.encodeUrl(document.location.origin + url);
 
-		const reverseObj = {};
+		const reverseObj: Record<string, string> = {};
 
 		Object.keys(data.text.reverseSearch).forEach((key: string) =>
 		{
@@ -757,7 +762,7 @@ export default class galleryClass
 			container = reverse;
 		}
 
-		const options: object = this.getReverseOptions(this.data.selected.src);
+		const options: Record<string, string> = this.getReverseOptions(this.data.selected.src);
 
 		container.innerHTML = Object.keys(options).map((site: string) =>
 		{
@@ -774,10 +779,10 @@ export default class galleryClass
 	 */
 	private apply = {
 		cache: {
-			info: null
+			info: null as [TGalleryTableItem, number, number] | null
 		},
 		timers: {
-			dimensions: null
+			dimensions: null as number | null
 		},
 		/* Sets an item dimension notification on navigate change */
 		itemDimensions: (index: number) =>
@@ -1343,7 +1348,7 @@ export default class galleryClass
 			return false;
 		}
 
-		let init = null;
+		let init: boolean | null = null;
 
 		const contentContainer: HTMLElement = this.container.querySelector(':scope > div.galleryContent');
 
@@ -1765,7 +1770,7 @@ export default class galleryClass
 				const action = eventTarget.getAttribute('data-action').toLowerCase();
 			
 				/* Translate action */
-				const translate = {
+				const translate: Record<string, () => void> = {
 					next: ((): void =>
 					{
 						this.navigate(null, 1);

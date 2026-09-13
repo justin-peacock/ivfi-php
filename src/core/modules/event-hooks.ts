@@ -15,7 +15,7 @@ const getEvents = (events: Array<string> | string) =>
 /**
  * Tests the existance of a path within an object
  */
-const objHas = (obj: undefined | object, path: string): boolean =>
+const objHas = (obj: undefined | Record<string, any>, path: string): boolean =>
 {
 	let level: Array<string> | string | null | undefined,
 		rest: Array<string> = [];

@@ -1,6 +1,6 @@
 /** Types */
 import { IGalleryOptions } from '../class-gallery';
-import { TUserClient } from '../module-config';
+import { TUserStorage } from '../module-config';
 
 /**
  * Filter component
@@ -126,9 +126,9 @@ export namespace MComponentSettings
 		) => TGathered;
 
 		set?: (
-			setData: object,
-			client: TUserClient
-		) => object;
+			setData: Record<string, any>,
+			client: TUserStorage
+		) => Record<string, any>;
 	};
 }
 

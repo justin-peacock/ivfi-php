@@ -3,28 +3,68 @@ import {
 	IDocumentGlobals
 } from '../common';
 
+/**
+ * A registered listener, per DOM element, keyed by event name then by the
+ * ID it was `listen()`ed under
+ */
+export type TElementEventHooksEvents = {
+	[eventName: string]: {
+		[id: string]: IEventItem;
+	};
+};
+
+/** Whether an element already has a single, shared DOM listener attached
+ * for a given event name */
+export type TElementEventHooksCallback = {
+	[eventName: string]: boolean;
+};
+
+export interface IElementEventHooks {
+	events: TElementEventHooksEvents;
+	hasCallback: TElementEventHooksCallback;
+}
+
 export interface HTMLElementEventHooks extends HTMLElement
 {
 	uniqueHookId: number;
-	eventHooks: {
-		events: object;
-		hasCallback: boolean | object;
-	}
+	eventHooks: IElementEventHooks;
 }
 
 export interface EventTargetEventHooks extends EventTarget
 {
 	uniqueHookId?: number;
-	eventHooks?: {
-		events: object;
-		hasCallback: boolean | object;
-	} | null,
+	eventHooks?: IElementEventHooks | null,
 	tagName?: string
 }
 
+/** The callbacks registered for one event, under one `listen()` ID and one
+ * per-element unique ID */
+export interface IEventCallbackEntry {
+	callbacks: Array<(...args: any) => void>;
+}
+
+/**
+ * The module-level listener registry: `listen()` ID, then a per-element
+ * unique ID, then event name
+ */
+export type TEventHooksEvents = {
+	[id: string]: {
+		[uniqueId: string]: {
+			[eventName: string]: IEventCallbackEntry;
+		};
+	};
+};
+
+/** Self-defined event subscriptions, keyed by event name then by ID */
+export type TEventHooksSubs = {
+	[eventName: string]: {
+		[id: string]: (...args: any) => void;
+	};
+};
+
 export interface IEventHooks {
-	events: object;
-	subs: object;
+	events: TEventHooksEvents;
+	subs: TEventHooksSubs;
 	currentId: number;
 
 	listenSetState?: (

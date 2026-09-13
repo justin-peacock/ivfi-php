@@ -10,7 +10,8 @@ import { log } from '../../modules/logger';
 /** Types */
 import {
 	MComponentSettings,
-	TUserClient
+	TUserStorage,
+	HTMLElementEventHooks
 } from '../../types';
 
 /**
@@ -327,9 +328,12 @@ options.gather = (container: HTMLElement) =>
 
 			if(element.tagName === 'SELECT')
 			{
+				/* Narrowed by the tagName check just above */
+				const selectElement = element as unknown as HTMLSelectElement;
+
 				const setValue = (id === 'theme'
-					? element[element.selectedIndex].value
-					: element.selectedIndex);
+					? (selectElement[selectElement.selectedIndex] as HTMLOptionElement).value
+					: selectElement.selectedIndex);
 
 				gathered[section][id] = setValue;
 
@@ -351,9 +355,20 @@ options.gather = (container: HTMLElement) =>
  * @param client user client instance
  * @returns {object} an object containing the changed settings
  */
-options.set = (setData: object, client: TUserClient) =>
+options.set = (setData: Record<string, any>, client: TUserStorage) =>
 {
 	client = client || user.get();
+
+	/**
+	 * `TUserClient`'s own shape is precise, but the section and option
+	 * names applied here come from the caller's markup (`data-key` and
+	 * `name` attributes), not from a fixed list, so this view is widened
+	 * to match how it is actually used below
+	 */
+	const dynClient = client as Record<string, any>;
+
+	/** Same as `dynClient`, for `update`'s nested per-section functions */
+	const dynUpdate = update as Record<string, any>;
 
 	/** Perform reload flag */
 	let performReload = false;
@@ -364,7 +379,7 @@ options.set = (setData: object, client: TUserClient) =>
 
 		if(!isMain && !Object.prototype.hasOwnProperty.call(client, key))
 		{
-			client[key] = {};
+			dynClient[key] = {};
 		}
 
 		Object.keys(setData[key]).forEach((option) =>
@@ -390,8 +405,8 @@ options.set = (setData: object, client: TUserClient) =>
 
 			/** Check if the option has changed, and if so, flag it for updating */
 			const changed: boolean = (isMain
-				? (client[option] !== value)
-				: (client[key][option] !== value)
+				? (dynClient[option] !== value)
+				: (dynClient[key][option] !== value)
 			);
 
 			/** Recreate object - set changed state and value */
@@ -401,9 +416,9 @@ options.set = (setData: object, client: TUserClient) =>
 
 			if(isMain)
 			{
-				client[option] = value;
+				dynClient[option] = value;
 			} else {
-				client[key][option] = value;
+				dynClient[key][option] = value;
 			}
 
 			if(changed)
@@ -412,10 +427,10 @@ options.set = (setData: object, client: TUserClient) =>
 				if(isMain
 					&& Object.prototype.hasOwnProperty.call(update, option))
 				{
-					update[option](value);
+					dynUpdate[option](value);
 				} else if(checkNested(update, key, option))
 				{
-					update[key][option](value);
+					dynUpdate[key][option](value);
 				}
 
 				/**
@@ -527,11 +542,13 @@ theme.set = (theme: any = null, setCookie = true): void | boolean =>
 
 export class componentSettings
 {
-	private client: TUserClient;
+	private client: TUserStorage;
 
 	private boundEvents: {
-		selector?: any;
-		events?: Array<string>;
+		[id: string]: {
+			selector?: any;
+			events?: Array<string>;
+		};
 	};
 
 	constructor()
@@ -554,7 +571,7 @@ export class componentSettings
 	/**
 	 * Apply settings (gather and set settings, then close menu)
 	 */
-	apply = (element: HTMLElement, client: TUserClient): void =>
+	apply = (element: HTMLElement, client: TUserStorage): void =>
 	{
 		client = client || user.get();
 
@@ -638,8 +655,9 @@ export class componentSettings
 					name : key
 				}, () =>
 				{
+					/* `key` names whichever gallery setting this row controls */
 					return checkNested(this.client, 'gallery', key)
-						? (this.client.gallery[key])
+						? (this.client.gallery as Record<string, any>)[key]
 						: config.get(`gallery.${key}`);
 				}), label, {
 					class : 'interactable'
@@ -736,10 +754,17 @@ export class componentSettings
 		};
 	};
 
-	removeOnUnbind = ({ selector, events, id }) =>
+	/**
+	 * `eventHooks.listen()` calls `onAdd` with these three positional
+	 * arguments (see event-hooks.ts), not a single options object; this
+	 * previously destructured `{ selector, events, id }` from `element`
+	 * alone, which silently picked up `element.id` (usually empty) as
+	 * `id` and left `selector` and `events` undefined
+	 */
+	removeOnUnbind = (element: HTMLElementEventHooks, events: Array<string>, id: string) =>
 	{
 		this.boundEvents[id] = {
-			selector, events
+			selector: element, events
 		};
 	};
 

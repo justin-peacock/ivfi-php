@@ -7,7 +7,7 @@ import { isString } from '../../helpers';
 export default class selectorClass
 {
 	/* Default definitions for common elements */
-	readonly defaultDefinitions = {
+	readonly defaultDefinitions: Record<string, string> = {
 		FILTER_INPUT: ':scope > div.filterContainer > input[type="text"]',
 		TOP_EXTEND: ':scope > div.topBar > div.extend',
 		TABLE_CONTAINER: ':scope > div.tableContainer',

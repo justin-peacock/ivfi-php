@@ -35,13 +35,16 @@ export type TPreviewOptions = {
 	delay?: number;
 	cursor?: boolean;
 	encodeAll?: boolean;
+	/** Reads the media source directly, instead of from the element's
+	 * `data-src`, `src` or `href` attribute */
+	source?: string;
 	force?: {
 		extension?: string | number;
 		type?: string | number;
-	};
+	} | null;
 	on?: {
 		onLoaded: (data: TOnPreviewLoad) => void;
-	};
+	} | null;
 };
 
 export type TExtensionArray = {

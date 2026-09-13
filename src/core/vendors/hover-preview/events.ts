@@ -3,10 +3,11 @@ import {
 	loadVideo,
 	createContainer,
 	getType,
-	HoverPreviewInstance
+	HoverPreviewInstance,
+	HoverPreviewMedia
 } from './utils';
 
-function setOffset(this: HoverPreviewInstance, e)
+function setOffset(this: HoverPreviewInstance, e: MouseEvent)
 {
 	this.data.offset = {
 		x : e.clientX,
@@ -14,9 +15,9 @@ function setOffset(this: HoverPreviewInstance, e)
 	};
 }
 
-function onEnter(this: HoverPreviewInstance, e)
+function onEnter(this: HoverPreviewInstance, e: MouseEvent)
 {
-	let target = e.target;
+	let target = e.target as HTMLElement;
 
 	// get source
 	if(Object.prototype.hasOwnProperty.call(this.options, 'source') && this.options.source)
@@ -68,7 +69,7 @@ function onEnter(this: HoverPreviewInstance, e)
 		{
 			// wait for media to show its dimensions
 			(this.data.type === 0 ? loadImage : loadVideo)
-			.call(this, this.data.src, function(e, dimensions)
+			.call(this, this.data.src, function(e: false | HoverPreviewMedia, dimensions: [number, number])
 			{
 				if(!e)
 				{
@@ -117,7 +118,7 @@ function update(this: HoverPreviewInstance)
 	});
 }
 
-export function mousemove(this: HoverPreviewInstance, e)
+export function mousemove(this: HoverPreviewInstance, e: MouseEvent)
 {
 	setOffset.call(this, e);
 
@@ -129,7 +130,7 @@ export function mousemove(this: HoverPreviewInstance, e)
 	update.call(this);
 }
 
-export function mouseenter(this: HoverPreviewInstance, e)
+export function mouseenter(this: HoverPreviewInstance, e: MouseEvent)
 {
 	this.active = true;
 
@@ -154,7 +155,7 @@ export function mouseenter(this: HoverPreviewInstance, e)
 }
 
 // destroy preview container
-export function mouseleave(this: HoverPreviewInstance, e)
+export function mouseleave(this: HoverPreviewInstance, e: MouseEvent)
 {
 	let timestamp = null;
 
@@ -178,9 +179,11 @@ export function mouseleave(this: HoverPreviewInstance, e)
 		this.currentElement.remove();
 	}
 
-	if(this.options.cursor && e.target.style.cursor === 'progress')
+	const target = e.target as HTMLElement;
+
+	if(this.options.cursor && target.style.cursor === 'progress')
 	{
-		e.target.style.cursor = this.data.cursor ? this.data.cursor : '';
+		target.style.cursor = this.data.cursor ? this.data.cursor : '';
 		this.data.cursor = null;
 	}
 

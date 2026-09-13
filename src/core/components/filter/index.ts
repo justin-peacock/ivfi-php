@@ -174,10 +174,14 @@ componentFilter.apply = (query = ''): void =>
 		container: document.body.querySelector(':scope > div.topBar')
 	};
 
+	/* `top`'s own shape is fixed; this loop only ever visits the three
+	 * optional keys it declares */
+	const dynTop = top as Record<string, any>;
+
 	/* Retrieve values */
 	(['size', 'files', 'directories']).forEach((key: string) =>
 	{
-		top[key] = top.container.querySelector(`[data-count="${key}"]`);
+		dynTop[key] = top.container.querySelector(`[data-count="${key}"]`);
 	});
 
 	/* Defaulting */

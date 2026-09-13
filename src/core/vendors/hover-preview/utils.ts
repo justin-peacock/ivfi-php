@@ -13,7 +13,20 @@
  */
 export type HoverPreviewInstance = any;
 
-function getLeft(left, eWidth, offsetX)
+/**
+ * What `loadImage()` and `loadVideo()` hand to their shared caller in
+ * events.ts, which only ever appends the element without caring which kind
+ * it is
+ */
+export type HoverPreviewMedia = HTMLImageElement | HTMLVideoElement;
+
+/** The callback both `loadImage()` and `loadVideo()` take */
+export type HoverPreviewLoadCallback = (
+	result: false | HoverPreviewMedia,
+	dimensions?: [number, number]
+) => void;
+
+function getLeft(left: boolean, eWidth: number, offsetX: number): number
 {
 	if(left)
 	{
@@ -36,7 +49,7 @@ function getLeft(left, eWidth, offsetX)
 	return 0;
 }
 
-function getTop(offset, dimensions)
+function getTop(offset: { x: number; y: number }, dimensions: { x: number; y: number }): number
 {
 	var wHeight = window.innerHeight;
 
@@ -52,7 +65,7 @@ function getTop(offset, dimensions)
 	return (wHeight / 100 * percentage - (dimensions.y) / 100 * percentage);
 }
 
-function move(left, element, data)
+function move(left: boolean, element: HTMLElement, data: { offset: { x: number; y: number }; dimensions: { x: number; y: number } })
 {
 	var offset = data.offset, dimensions = data.dimensions;
 
@@ -66,7 +79,7 @@ export function getMove()
 {
 	if(window.requestAnimationFrame)
 	{
-		return function(left, element, data)
+		return function(left: boolean, element: HTMLElement, data: { offset: { x: number; y: number }; dimensions: { x: number; y: number } })
 		{
 			window.requestAnimationFrame(function()
 			{
@@ -75,7 +88,7 @@ export function getMove()
 		};
 	}
 
-	return function(left, element, data)
+	return function(left: boolean, element: HTMLElement, data: { offset: { x: number; y: number }; dimensions: { x: number; y: number } })
 	{
 		move(left, element, data);
 	};
@@ -108,7 +121,7 @@ export function createContainer()
 
 	container.className = 'preview-container';
 
-	var styles = {
+	var styles: { [key: string]: string } = {
 		'pointer-events' : 'none',
 		'position' : 'fixed',
 		'visibility' : 'hidden',
@@ -121,18 +134,30 @@ export function createContainer()
 
 	Object.keys(styles).forEach((key) =>
 	{
-		container.style[key] = styles[key];
+		/* See the identical cast in DOM.style.set() for why this is safe */
+		(container.style as unknown as Record<string, string>)[key] = styles[key];
 	});
 
 	return container;
 }
 
-function encodeUrl(this: HoverPreviewInstance, input)
+function encodeUrl(this: HoverPreviewInstance, input: string): string
 {
 	return this.options.encodeAll ? input.replace('#', '%23').replace('?', '%3F') : encodeURI(input);
 }
 
-function isAudible(video)
+/**
+ * `webkitAudioDecodedByteCount`, `mozHasAudio` and `audioTracks` are
+ * non-standard, browser-specific ways to detect whether a video has an
+ * audio track; none of the three is in the standard `HTMLVideoElement`
+ */
+interface IAudioDetectableVideo extends HTMLVideoElement {
+	webkitAudioDecodedByteCount?: number;
+	mozHasAudio?: boolean;
+	audioTracks?: { length: number };
+}
+
+function isAudible(video: IAudioDetectableVideo): boolean
 {
     if(typeof video.webkitAudioDecodedByteCount !== 'undefined')
     {
@@ -165,7 +190,7 @@ function isAudible(video)
     return false;
 }
 
-export function loadImage(this: HoverPreviewInstance, src, callback)
+export function loadImage(this: HoverPreviewInstance, src: string, callback: HoverPreviewLoadCallback)
 {
 	var _this = this;
 
@@ -173,8 +198,9 @@ export function loadImage(this: HoverPreviewInstance, src, callback)
 
 	this.currentElement = img;
 
-	img.style['max-width'] = 'inherit';
-	img.style['max-height'] = 'inherit';
+	/* See the identical cast in DOM.style.set() for why this is safe */
+	(img.style as unknown as Record<string, string>)['max-width'] = 'inherit';
+	(img.style as unknown as Record<string, string>)['max-height'] = 'inherit';
 
 	img.src = encodeUrl.call(_this, src);
 
@@ -215,7 +241,7 @@ export function loadImage(this: HoverPreviewInstance, src, callback)
 	}, 30);
 }
 
-export function loadVideo(this: HoverPreviewInstance, src, callback)
+export function loadVideo(this: HoverPreviewInstance, src: string, callback: HoverPreviewLoadCallback)
 {
 	var _this = this;
 
@@ -225,17 +251,18 @@ export function loadVideo(this: HoverPreviewInstance, src, callback)
 
 	this.currentElement = video;
 
-	['muted', 'loop', 'autoplay'].forEach((key) =>
+	(['muted', 'loop', 'autoplay'] as Array<keyof HTMLVideoElement>).forEach((key) =>
 	{
-		video[key] = true;
+		(video[key] as boolean) = true;
 	});
 
 	source.type = 'video/' + (this.data.extension === 'mov' ? 'mp4' : (this.data.extension === 'ogv' ? 'ogg' : this.data.extension));
 
 	source.src = encodeUrl.call(this, src);
 
-	video.style['max-width'] = 'inherit';
-	video.style['max-height'] = 'inherit';
+	/* See the identical cast in DOM.style.set() for why this is safe */
+	(video.style as unknown as Record<string, string>)['max-width'] = 'inherit';
+	(video.style as unknown as Record<string, string>)['max-height'] = 'inherit';
 
 	video.onloadeddata = function()
 	{

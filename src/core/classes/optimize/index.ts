@@ -225,7 +225,9 @@ export default class optimizeClass
 		this.structure = structure;
 
 		this.activeHasChanged = true;
-		this.page.scrolledY = (this.scope[0])[this.scope[1]];
+		/* `this.scope` names an arbitrary property (e.g. `scrollY` on
+		 * `window`) on either of two unrelated element/window types */
+		this.page.scrolledY = (this.scope[0] as Record<string, any>)[this.scope[1]];
 
 		let index = 0;
 
@@ -531,7 +533,9 @@ export default class optimizeClass
 		log('optimize', '->', 'optimize.refresh');
 
 		/* Get scroll pos */
-		this.page.scrolledY = (this.scope[0])[this.scope[1]];
+		/* `this.scope` names an arbitrary property (e.g. `scrollY` on
+		 * `window`) on either of two unrelated element/window types */
+		this.page.scrolledY = (this.scope[0] as Record<string, any>)[this.scope[1]];
 
 		/* Get origin point */
 		const tablePosTop: number = this.table.getBoundingClientRect().top;

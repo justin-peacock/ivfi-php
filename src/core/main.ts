@@ -246,12 +246,12 @@ eventHooks.listen(window, 'resize', 'windowResize', debounce((): void =>
 if(config.get('mobile') === false
 	&& config.get('preview.enabled') === true)
 {
-	const previews = {};
+	const previews: Record<number, ReturnType<typeof hoverPreview>> = {};
 
-	let resume = null;
-	let timerReadyState = null;
+	let resume: { src: string; timestamp: number } | null = null;
+	let timerReadyState: number | null = null;
 
-	const onLoaded = (event: TOnPreviewLoad) =>
+	const onLoaded = (event: TOnPreviewLoad): void =>
 	{
 		log('preview', 'Preview loaded =>', event);
 
@@ -261,7 +261,7 @@ if(config.get('mobile') === false
 			data.preview.data.element.remove();
 		}
 
-		if(!data.preview.isLoadable) return null;
+		if(!data.preview.isLoadable) return;
 
 		const [element, type, src] = [
 			event.element,
