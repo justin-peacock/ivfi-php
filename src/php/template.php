@@ -34,6 +34,45 @@ $config = [
      */
     'authentication' => false,
     /**
+     * Upload options
+     *
+     * Lets a signed-in client drag files onto the listing to write them into
+     * the directory being viewed.
+     *
+     * The endpoint only ever exists for a request that carries an
+     * authenticated session, so it follows `authentication` above: a
+     * deployment with no users configured, or one whose `restrict` pattern
+     * does not cover the path, offers no upload at all. There is no flag that
+     * changes that. Writing into a directory the web server serves is how a
+     * listing becomes a shell, so it is not opened to anonymous visitors
+     *
+     *   'upload' => [
+     *     'enabled' => true,
+     *     'extensions' => ['jpg', 'png', 'mp4'], // true = the media extensions below
+     *     'max_size' => 104857600,               // bytes, false follows php.ini
+     *     'overwrite' => false,
+     *     'restrict' => '/^\/(incoming)\/?/i'   // optional, only these paths
+     *   ]
+     */
+    'upload' => [
+      /* Whether uploads should be accepted at all */
+      'enabled' => false,
+      /**
+       * The extensions that are accepted, as an allowlist.
+       *
+       * `true` accepts whatever `extensions` further down lists as image or
+       * video. Extensions the server is liable to execute are refused
+       * whatever this is set to
+       */
+      'extensions' => true,
+      /* Largest accepted file in bytes. `false` follows the php.ini limits */
+      'max_size' => false,
+      /* Whether an upload may replace a file that is already there */
+      'overwrite' => false,
+      /* Optional pattern, so only some of the authenticated paths accept uploads */
+      'restrict' => false
+    ],
+    /**
      * Enables single-page features
      */
     'single_page' => false,
@@ -601,6 +640,46 @@ define('AUTH_FIELD_PASS', 'ivfi_pass');
 define('AUTH_FIELD_CSRF', 'ivfi_csrf');
 /** Query parameter that signs the client out */
 define('AUTH_PARAM_LOGOUT', 'ivfi_logout');
+/** Field names used by the upload endpoint */
+define('UPLOAD_FIELD_ACTION', 'ivfi_action');
+define('UPLOAD_FIELD_FILE', 'ivfi_file');
+/** Value of `UPLOAD_FIELD_ACTION` that marks a request as an upload */
+define('UPLOAD_ACTION', 'upload');
+/**
+ * Room left for the rest of a multipart body when deriving a size limit from
+ * `post_max_size`: the boundaries, the part headers and the other fields
+ */
+define('UPLOAD_ENVELOPE_BYTES', 8192);
+/**
+ * Extensions that are never accepted, whatever the allowlist is set to.
+ *
+ * The script writes into a directory the web server is already serving, so an
+ * accepted `.php` is not a file in a listing, it is code the next request
+ * runs. The same goes for anything that reconfigures the server (`.htaccess`,
+ * `.user.ini`) or that a stock handler mapping hands to an interpreter
+ */
+define('UPLOAD_BLOCKED_EXTENSIONS', [
+  'php', 'php2', 'php3', 'php4', 'php5', 'php6', 'php7', 'php8',
+  'phps', 'pht', 'phtm', 'phtml', 'phar', 'inc', 'hphp', 'ctp',
+  'htaccess', 'htpasswd', 'ini', 'user',
+  'cgi', 'fcgi', 'pl', 'py', 'rb', 'sh', 'bash',
+  'asp', 'aspx', 'ashx', 'asmx', 'cer', 'jsp', 'jspx', 'shtml', 'shtm'
+]);
+/**
+ * Extensions that are never accepted because of what the *browser* does with
+ * them, rather than the server.
+ *
+ * The listing links every file directly, and one of these opened as a document
+ * runs script in this page's origin: the origin holding the session cookie of
+ * whoever opens it. An SVG is the one that matters in practice, because it is
+ * an image everywhere else and is in the default media extensions, so without
+ * this an upload allowlist of "images and video" quietly accepts markup that
+ * can act as the next visitor
+ */
+define('UPLOAD_ACTIVE_EXTENSIONS', [
+  'svg', 'svgz', 'html', 'htm', 'xhtml', 'xht', 'mhtml', 'mht',
+  'xml', 'xsl', 'xslt', 'swf'
+]);
 
 /**
  * The first value of a possibly chained forwarding header
@@ -1232,6 +1311,781 @@ function authenticate($users, $realm, $options = [])
 }
 
 /**
+ * Whether an extension is refused whatever the allowlist says
+ *
+ * @param String  $extension  A lowercase extension, without the dot
+ *
+ * @return Boolean
+ */
+function uploadIsRefusedExtension($extension)
+{
+  return in_array($extension, UPLOAD_BLOCKED_EXTENSIONS, true)
+    || in_array($extension, UPLOAD_ACTIVE_EXTENSIONS, true);
+}
+
+/**
+ * Parses a php.ini size value such as `8M` or `1G` into bytes
+ *
+ * @param String  $value  The ini value
+ *
+ * @return Integer
+ */
+function uploadParseIniSize($value)
+{
+  $value = trim((string) $value);
+
+  if($value === '')
+  {
+    return 0;
+  }
+
+  $bytes = (int) $value;
+  $unit = strtolower($value[strlen($value) - 1]);
+
+  /* Deliberate fall-through: each unit is the one below it multiplied again */
+  switch($unit)
+  {
+    case 'g': $bytes *= 1024;
+    case 'm': $bytes *= 1024;
+    case 'k': $bytes *= 1024;
+  }
+
+  return $bytes;
+}
+
+/**
+ * The largest upload this deployment accepts, in bytes
+ *
+ * PHP discards a body over `post_max_size` before the script is reached, so
+ * the client is told the limit up front rather than discovering it as a
+ * request that answers with nothing it can read.
+ *
+ * @param Array  $options  Upload options
+ *
+ * @return Integer  Zero when nothing imposes a limit
+ */
+function uploadMaxSize($options)
+{
+  $limits = [];
+
+  $file = uploadParseIniSize(ini_get('upload_max_filesize'));
+  $post = uploadParseIniSize(ini_get('post_max_size'));
+
+  if($file > 0)
+  {
+    $limits[] = $file;
+  }
+
+  /* The file is only part of the body, so the envelope comes out of the same budget */
+  if($post > 0)
+  {
+    $limits[] = $post - UPLOAD_ENVELOPE_BYTES;
+  }
+
+  if(isset($options['max_size'])
+    && is_int($options['max_size'])
+    && $options['max_size'] > 0)
+  {
+    $limits[] = $options['max_size'];
+  }
+
+  if($limits === [])
+  {
+    return 0;
+  }
+
+  $smallest = min($limits);
+
+  /**
+   * A `post_max_size` the envelope alone exhausts leaves nothing for a file.
+   * Reported as one byte rather than as zero, because zero is what every
+   * caller here reads as "nothing limits this" — returning it would turn the
+   * most restrictive configuration there is into no limit at all
+   */
+  return $smallest > 0 ? $smallest : 1;
+}
+
+/**
+ * The extensions the upload endpoint accepts
+ *
+ * An allowlist rather than a list of things to refuse: a new handler mapping
+ * on the host adds to what is dangerous, it never adds to what was listed
+ * here, so anything unanticipated lands on the safe side.
+ *
+ * @param Array  $options     Upload options
+ * @param Array  $extensions  The configured media extensions
+ *
+ * @return Array
+ */
+function uploadAllowedExtensions($options, $extensions)
+{
+  $allowed = isset($options['extensions']) ? $options['extensions'] : true;
+
+  /**
+   * Whether this list was written by the operator. The media extensions are
+   * not: they carry `svg`, which is refused below, and complaining about a
+   * default on every request would be noise in the log rather than a finding
+   */
+  $configured = $allowed !== true;
+
+  /* `true` follows whatever the index already treats as media */
+  if($allowed === true)
+  {
+    $allowed = [];
+
+    if(is_array($extensions))
+    {
+      foreach(['image', 'video'] as $type)
+      {
+        if(isset($extensions[$type]) && is_array($extensions[$type]))
+        {
+          $allowed = array_merge($allowed, $extensions[$type]);
+        }
+      }
+    }
+  }
+
+  if(!is_array($allowed))
+  {
+    return [];
+  }
+
+  $pool = [];
+
+  foreach($allowed as $extension)
+  {
+    if(!is_string($extension))
+    {
+      continue;
+    }
+
+    $extension = strtolower(ltrim(trim($extension), '.'));
+
+    if($extension === '')
+    {
+      continue;
+    }
+
+    /**
+     * The blocklists win over the configuration. An operator who lists `php`
+     * here has written an upload form for a web shell, and the likeliest way
+     * for that to happen is a list copied from somewhere else
+     */
+    if(uploadIsRefusedExtension($extension))
+    {
+      if($configured)
+      {
+        error_log(sprintf(
+          'IVFi: refusing to accept .%s uploads, which can run as this origin',
+          $extension
+        ));
+      }
+
+      continue;
+    }
+
+    $pool[$extension] = true;
+  }
+
+  return array_keys($pool);
+}
+
+/**
+ * Reduces a client supplied filename to something safe to write
+ *
+ * @param String  $name  The name as the client sent it
+ *
+ * @return String  An empty string when nothing usable is left
+ */
+function uploadSafeName($name)
+{
+  $name = (string) $name;
+
+  /**
+   * A name that is not valid UTF-8 is refused rather than repaired: it cannot
+   * be rendered back into the listing, and every `preg_*` below would return
+   * NULL on it and quietly turn the name into nothing
+   */
+  if($name === '' || !preg_match('//u', $name))
+  {
+    return '';
+  }
+
+  /* Both separators, so a Windows client cannot describe a path */
+  $name = str_replace('\\', '/', $name);
+  $slash = strrpos($name, '/');
+
+  if($slash !== false)
+  {
+    $name = substr($name, $slash + 1);
+  }
+
+  /* Control characters, the NUL that truncates a path among them */
+  $name = preg_replace('/[\x00-\x1F\x7F]+/u', '', $name);
+
+  /**
+   * Windows drops trailing dots and spaces when it opens a path, so a name
+   * ending in one is a name that means something else on arrival
+   */
+  $name = rtrim($name, " \t.");
+
+  /**
+   * Leading dots make a dotfile (`.htaccess`, `.user.ini`, `.ivfi`), and they
+   * are taken together with the whitespace rather than after it: trimming the
+   * two in separate passes leaves ` .secret.jpg` as a dotfile, because the
+   * leading character at the point the dots are stripped is a space
+   */
+  $name = ltrim($name, " \t.");
+
+  if($name === '' || $name === '.' || $name === '..')
+  {
+    return '';
+  }
+
+  /**
+   * Refused rather than shortened, because trimming a long name to fit can
+   * take the extension off it or collide it with something already there
+   */
+  if(strlen($name) > 255)
+  {
+    return '';
+  }
+
+  return $name;
+}
+
+/**
+ * Why a sanitised filename cannot be accepted
+ *
+ * @param String  $name     A name that has been through `uploadSafeName()`
+ * @param Array   $allowed  Accepted extensions
+ *
+ * @return String  NULL when the name is fine
+ */
+function uploadNameRejection($name, $allowed)
+{
+  $segments = explode('.', strtolower($name));
+
+  if(count($segments) < 2)
+  {
+    return 'Files without an extension are not accepted.';
+  }
+
+  $extension = array_pop($segments);
+
+  if(!in_array($extension, $allowed, true))
+  {
+    return sprintf('.%s files are not accepted here.', $extension);
+  }
+
+  /* The first segment is the name itself, not an extension */
+  array_shift($segments);
+
+  /**
+   * Apache's `AddHandler` matches any extension in a name rather than the last
+   * one, so on a host configured that way `payload.php.jpg` is served as PHP
+   * despite ending in something this allowlist accepts
+   */
+  foreach($segments as $segment)
+  {
+    if(uploadIsRefusedExtension($segment))
+    {
+      /**
+       * Deliberately not "the server may execute": this covers the active
+       * content list too, and an `.svg` is refused for what the browser does
+       * with it rather than the server
+       */
+      return 'That name carries an extension that is not accepted here.';
+    }
+  }
+
+  return NULL;
+}
+
+/**
+ * A readable form of a `$_FILES` error code
+ *
+ * @param Integer  $code  The error code
+ *
+ * @return String
+ */
+function uploadErrorMessage($code)
+{
+  switch($code)
+  {
+    case UPLOAD_ERR_INI_SIZE:
+      return sprintf(
+        'The file is larger than the server accepts (upload_max_filesize is %s).',
+        ini_get('upload_max_filesize')
+      );
+
+    case UPLOAD_ERR_FORM_SIZE:
+      return 'The file is larger than this form accepts.';
+
+    case UPLOAD_ERR_PARTIAL:
+      return 'The upload was interrupted before it finished.';
+
+    case UPLOAD_ERR_NO_FILE:
+      return 'No file was sent.';
+
+    case UPLOAD_ERR_NO_TMP_DIR:
+    case UPLOAD_ERR_CANT_WRITE:
+    case UPLOAD_ERR_EXTENSION:
+      error_log(sprintf('IVFi: an upload failed server-side with code %d', $code));
+
+      return 'The server could not store the upload.';
+  }
+
+  return 'The upload failed.';
+}
+
+/**
+ * Claims a name for a staged file without overwriting anything
+ *
+ * @param String  $staged  The staged file
+ * @param String  $target  The name to claim
+ *
+ * @return Boolean
+ */
+function uploadClaim($staged, $target)
+{
+  /**
+   * Checked rather than called and caught. Shared hosts routinely put `link`
+   * in `disable_functions`, and on PHP 8 a disabled function is gone from the
+   * function table rather than returning false: calling it raises an `Error`
+   * that `@` does not suppress, which would abandon the staged file and answer
+   * with a 500 carrying no JSON at all. Those hosts are exactly the ones the
+   * fallback below exists for
+   */
+  if(!function_exists('link'))
+  {
+    return false;
+  }
+
+  return @link($staged, $target);
+}
+
+/**
+ * Answers an upload request, ending the request
+ *
+ * @param Integer  $status   HTTP status code
+ * @param Array    $payload  The response body
+ *
+ * @return void
+ */
+function uploadRespond($status, $payload)
+{
+  http_response_code($status);
+
+  header('Content-Type: application/json; charset=utf-8');
+  header('Cache-Control: no-store');
+  /* The answer is read by script, never rendered, so nothing should sniff it */
+  header('X-Content-Type-Options: nosniff');
+
+  exit(json_encode($payload));
+}
+
+/**
+ * Whether this request may upload
+ *
+ * @param Array    $config         Configuration values
+ * @param Boolean  $authenticated  Whether the request carries a signed-in session
+ *
+ * @return Boolean
+ */
+function uploadIsAvailable($config, $authenticated)
+{
+  if(!uploadIsEnabled($config))
+  {
+    return false;
+  }
+
+  /**
+   * The endpoint writes into a directory the web server serves, so it only
+   * exists for a request that has already proven who it is. A deployment with
+   * no `authentication`, or one whose `restrict` pattern leaves this path
+   * open, arrives here unauthenticated and is offered nothing
+   */
+  if(!$authenticated)
+  {
+    return false;
+  }
+
+  /* An optional second filter, for opening up only part of an index */
+  if(isset($config['upload']['restrict'])
+    && is_string($config['upload']['restrict']))
+  {
+    /**
+     * A pattern that does not compile makes `preg_match()` return false, which
+     * closes the endpoint rather than opening it
+     */
+    if(!preg_match($config['upload']['restrict'], CURRENT_URI))
+    {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+/**
+ * Whether uploads are switched on at all, regardless of who is asking
+ *
+ * @param Array  $config  Configuration values
+ *
+ * @return Boolean
+ */
+function uploadIsEnabled($config)
+{
+  return isset($config['upload'])
+    && is_array($config['upload'])
+    && !empty($config['upload']['enabled']);
+}
+
+/**
+ * Handles the request when it is an upload, and returns otherwise
+ *
+ * @param Indexer  $indexer    Indexer class
+ * @param Array    $config     Configuration values
+ * @param Boolean  $available  Whether this request may upload
+ *
+ * @return void
+ */
+function handleUpload($indexer, $config, $available)
+{
+  if(!uploadIsEnabled($config)
+    || (isset($_SERVER['REQUEST_METHOD']) ? $_SERVER['REQUEST_METHOD'] : 'GET') !== 'POST')
+  {
+    return;
+  }
+
+  $contentType = isset($_SERVER['CONTENT_TYPE']) ? strtolower($_SERVER['CONTENT_TYPE']) : '';
+
+  if(strpos($contentType, 'multipart/form-data') !== 0)
+  {
+    return;
+  }
+
+  /**
+   * A body over `post_max_size` is thrown away before the script runs, leaving
+   * a POST carrying neither fields nor files. Nothing in it says it was an
+   * upload, so it is recognised by that shape: the alternative is rendering a
+   * whole listing at a client that is parsing the answer as JSON
+   */
+  $discarded = $_POST === []
+    && $_FILES === []
+    && isset($_SERVER['CONTENT_LENGTH'])
+    && (int) $_SERVER['CONTENT_LENGTH'] > 0;
+
+  if(!$discarded
+    && (!isset($_POST[UPLOAD_FIELD_ACTION])
+      || $_POST[UPLOAD_FIELD_ACTION] !== UPLOAD_ACTION))
+  {
+    return;
+  }
+
+  if(!$available)
+  {
+    uploadRespond(403, [
+      'ok' => false,
+      'error' => 'Uploads are not enabled here.'
+    ]);
+  }
+
+  if($discarded)
+  {
+    uploadRespond(413, [
+      'ok' => false,
+      'error' => sprintf(
+        'The request was larger than the server accepts (post_max_size is %s).',
+        ini_get('post_max_size')
+      )
+    ]);
+  }
+
+  $token = isset($_POST[AUTH_FIELD_CSRF]) ? (string) $_POST[AUTH_FIELD_CSRF] : '';
+
+  if(empty($_SESSION['csrf']) || !hash_equals($_SESSION['csrf'], $token))
+  {
+    uploadRespond(403, [
+      'ok' => false,
+      'error' => 'Your session expired. Reload the page and try again.'
+    ]);
+  }
+
+  if(!isset($_FILES[UPLOAD_FIELD_FILE])
+    || !is_array($_FILES[UPLOAD_FIELD_FILE])
+    || is_array($_FILES[UPLOAD_FIELD_FILE]['name']))
+  {
+    uploadRespond(400, [
+      'ok' => false,
+      'error' => 'No file was sent.'
+    ]);
+  }
+
+  $file = $_FILES[UPLOAD_FIELD_FILE];
+  $code = isset($file['error']) ? (int) $file['error'] : UPLOAD_ERR_NO_FILE;
+
+  if($code !== UPLOAD_ERR_OK)
+  {
+    uploadRespond(
+      ($code === UPLOAD_ERR_INI_SIZE || $code === UPLOAD_ERR_FORM_SIZE) ? 413 : 400,
+      ['ok' => false, 'error' => uploadErrorMessage($code)]
+    );
+  }
+
+  /**
+   * Guards against a `tmp_name` that names a path the request never uploaded,
+   * which is what turns a move into a way of relocating any readable file
+   */
+  if(!isset($file['tmp_name']) || !is_uploaded_file($file['tmp_name']))
+  {
+    uploadRespond(400, [
+      'ok' => false,
+      'error' => 'The upload did not arrive intact.'
+    ]);
+  }
+
+  $name = uploadSafeName(isset($file['name']) ? $file['name'] : '');
+
+  if($name === '')
+  {
+    uploadRespond(400, [
+      'ok' => false,
+      'error' => 'That filename cannot be used.'
+    ]);
+  }
+
+  $rejection = uploadNameRejection(
+    $name, uploadAllowedExtensions($config['upload'], $config['extensions'])
+  );
+
+  if($rejection !== NULL)
+  {
+    uploadRespond(415, ['ok' => false, 'error' => $rejection]);
+  }
+
+  $maximum = uploadMaxSize($config['upload']);
+  $size = isset($file['size']) ? (int) $file['size'] : 0;
+
+  if($maximum > 0 && $size > $maximum)
+  {
+    uploadRespond(413, [
+      'ok' => false,
+      'error' => 'The file is larger than this server accepts.'
+    ]);
+  }
+
+  $directory = $indexer->path;
+
+  /**
+   * The constructor already refused a path outside the base directory. It is
+   * checked again because this is the one request that writes rather than
+   * lists, and the cost of being wrong is not a wrong listing
+   */
+  if(!is_dir($directory)
+    || !Helpers::isAboveCurrent($directory, BASE_PATH))
+  {
+    uploadRespond(403, [
+      'ok' => false,
+      'error' => 'That directory does not accept uploads.'
+    ]);
+  }
+
+  $directory = rtrim($directory, DIRECTORY_SEPARATOR);
+  $target = $directory . DIRECTORY_SEPARATOR . $name;
+
+  /* A sanitised name resolves inside the directory; anything else is a bug here */
+  if(dirname($target) !== $directory)
+  {
+    uploadRespond(400, [
+      'ok' => false,
+      'error' => 'That filename cannot be used.'
+    ]);
+  }
+
+  $overwrite = !empty($config['upload']['overwrite']);
+
+  /**
+   * A cheap early answer, so the common case of a name already taken does not
+   * pay for the move first. It is not what enforces the rule: that is the
+   * `link()` below, because anything decided here can change before the write
+   */
+  if(file_exists($target) || is_link($target))
+  {
+    if(!$overwrite)
+    {
+      uploadRespond(409, [
+        'ok' => false,
+        'error' => 'A file with that name is already here.'
+      ]);
+    }
+
+    /**
+     * Overwriting is for replacing a file with a newer copy of itself. A
+     * directory, or a symlink pointing at something outside this tree, is not
+     * that, and following one would write wherever it happens to lead
+     */
+    if(!is_file($target) || is_link($target))
+    {
+      uploadRespond(409, [
+        'ok' => false,
+        'error' => 'That name is taken by something an upload cannot replace.'
+      ]);
+    }
+  }
+
+  if(!is_writable($directory))
+  {
+    error_log(sprintf('IVFi: uploads are enabled but %s is not writable', $directory));
+
+    uploadRespond(500, [
+      'ok' => false,
+      'error' => 'The server cannot write to this directory.'
+    ]);
+  }
+
+  /**
+   * Staged under a name of this script's choosing, inside the directory it is
+   * bound for, so that the step which claims the real name is a single
+   * operation on one filesystem. Moving straight to the target instead would
+   * leave a window between the checks above and the write in which another
+   * request creates the file, or swaps a symlink in at the name:
+   * `move_uploaded_file()` overwrites what it finds and follows where it
+   * points.
+   *
+   * The staging name is a dotfile, which the listing skips, so a request
+   * arriving mid-upload never sees a partial file
+   */
+  $staged = sprintf(
+    '%s%s.ivfi-upload-%s.part',
+    $directory, DIRECTORY_SEPARATOR, bin2hex(random_bytes(8))
+  );
+
+  if(!move_uploaded_file($file['tmp_name'], $staged))
+  {
+    error_log(sprintf('IVFi: could not move an upload into %s', $directory));
+
+    uploadRespond(500, [
+      'ok' => false,
+      'error' => 'The file could not be written.'
+    ]);
+  }
+
+  /**
+   * `move_uploaded_file()` carries the temporary file's mode over, which
+   * follows the process umask and can leave the file unreadable to the very
+   * server that is meant to serve it back. Set here rather than after the
+   * rename, so the file never sits at its real name with the wrong mode.
+   *
+   * A failure is not by itself fatal: filesystems that carry no Unix modes at
+   * all (a FAT or CIFS mount, say) refuse every `chmod()` while serving the
+   * file perfectly well, and discarding a good upload there would be worse
+   * than the problem. What matters is the outcome, so that is what is checked
+   */
+  if(!@chmod($staged, 0644))
+  {
+    if(!is_readable($staged))
+    {
+      @unlink($staged);
+
+      error_log(sprintf(
+        'IVFi: an upload into %s could not be made readable', $directory
+      ));
+
+      uploadRespond(500, [
+        'ok' => false,
+        'error' => 'The file could not be stored readably.'
+      ]);
+    }
+
+    error_log(sprintf(
+      'IVFi: could not set the mode on an upload into %s, which is readable anyway',
+      $directory
+    ));
+  }
+
+  if($overwrite)
+  {
+    /**
+     * `rename()` replaces the directory entry itself rather than writing
+     * through it, so a symlink that appeared at the name since the check above
+     * is replaced rather than followed
+     */
+    if(!@rename($staged, $target))
+    {
+      @unlink($staged);
+
+      error_log(sprintf('IVFi: could not rename an upload into place in %s', $directory));
+
+      uploadRespond(500, [
+        'ok' => false,
+        'error' => 'The file could not be written.'
+      ]);
+    }
+  } else if(!uploadClaim($staged, $target))
+  {
+    /**
+     * `link()` is the atomic claim on a name: it fails outright when anything
+     * already holds it, a symlink or a directory included, which is what makes
+     * "do not overwrite" a guarantee rather than the result of a check that
+     * another request can invalidate
+     */
+    /**
+     * The early check above stat'ed this path and PHP caches that per request,
+     * so without clearing it the answer here can be the one from before the
+     * upload was staged. A name another request claimed in between would read
+     * as free, and the fallback below would rename straight over it
+     */
+    clearstatcache(true, $target);
+
+    $taken = file_exists($target) || is_link($target);
+
+    if(!$taken && @rename($staged, $target))
+    {
+      /**
+       * Some filesystems do not carry hard links at all. Falling back keeps
+       * those deployments working, at the cost of the guarantee narrowing back
+       * to the window this rename occupies
+       */
+      error_log(sprintf(
+        'IVFi: could not hard link into %s (unsupported, or `link` is disabled), '
+          . 'so uploads there cannot claim a name atomically',
+        $directory
+      ));
+    } else {
+      @unlink($staged);
+
+      if($taken)
+      {
+        uploadRespond(409, [
+          'ok' => false,
+          'error' => 'A file with that name is already here.'
+        ]);
+      }
+
+      error_log(sprintf('IVFi: could not link an upload into place in %s', $directory));
+
+      uploadRespond(500, [
+        'ok' => false,
+        'error' => 'The file could not be written.'
+      ]);
+    }
+  } else {
+    /* The link is the file now, so the staged name is just another reference */
+    @unlink($staged);
+  }
+
+  uploadRespond(201, [
+    'ok' => true,
+    'file' => [
+      'name' => $name,
+      'size' => $size
+    ]
+  ]);
+}
+
+/**
  * Extracts themes from a given path
  *
  * @param String   $basePath     The given base path of the script
@@ -1316,6 +2170,16 @@ if(file_exists(CONFIG_FILE))
 }
 
 /**
+ * Whether this request carries a session `authenticate()` accepted.
+ *
+ * Set from the calls below rather than read back off `$_SESSION`, because the
+ * session is not necessarily this script's: with `session.auto_start` on, any
+ * other application sharing the host can leave a `user` key in there, and an
+ * index with no `authentication` configured would then read it as a sign-in
+ */
+$authenticated = false;
+
+/**
  * Call authentication function
  */
 if(isset($config['authentication'])
@@ -1339,11 +2203,14 @@ if(isset($config['authentication'])
     /* Restrict content if `restrict` filter matches successfully or it is unset */
     if($isRestricted)
     {
+      /* Returns only on an accepted session, and ends the request otherwise */
       authenticate(
         $config['authentication']['users'],
         'Restricted content.',
         $config['authentication']
       );
+
+      $authenticated = true;
     }
   } else {
     /* Don't use any potential `users` array to authenticate, use main array instead */
@@ -1355,6 +2222,8 @@ if(isset($config['authentication'])
     authenticate(
       $config['authentication'], 'Restricted content.', $config['authentication']
     );
+
+    $authenticated = true;
   }
 }
 
@@ -2803,6 +3672,29 @@ try
   );
 }
 
+/** Whether this request is allowed to write into the directory it is viewing */
+$uploadAvailable = uploadIsAvailable($config, $authenticated);
+
+/**
+ * Answered here rather than earlier because the target directory is the one
+ * the Indexer resolved: its constructor has already refused anything outside
+ * the base directory, so an upload cannot reach a path a listing could not.
+ *
+ * Returns immediately unless this request is an upload, and never returns when
+ * it is
+ */
+handleUpload($indexer, $config, $uploadAvailable);
+
+/**
+ * The page carries the form token so that an upload can prove it came from
+ * here. It is the same value the login form renders on the same page, so this
+ * exposes nothing the document did not already hold
+ */
+if($uploadAvailable && empty($_SESSION['csrf']))
+{
+  $_SESSION['csrf'] = bin2hex(random_bytes(32));
+}
+
 /* Get directory data */
 $table = $indexer->buildTable(
   $sorting['enabled'] ? $sorting['order'] : false,
@@ -3172,10 +4064,11 @@ function generateCountDiv($modified, $count, $sString, $pString)
  * @param Integer   $timestamp   Timestamp
  * @param String    $bust        Cache-busting string
  * @param Array     $theme       An array containg a pool and a selected theme
+ * @param Boolean   $upload      Whether this request may upload
  * 
  * @return String
  */ 
-function constructJsConfig($config, $sorting, $timestamp, $bust, $theme)
+function constructJsConfig($config, $sorting, $timestamp, $bust, $theme, $upload)
 {
   /**
    * [Extract themes and options values]
@@ -3224,6 +4117,41 @@ function constructJsConfig($config, $sorting, $timestamp, $bust, $theme)
     'extensions' => [
       'image' => $extensions['image'],
       'video' => $extensions['video']
+    ],
+    /**
+     * Only described to a client that may actually use it. Everyone else is
+     * told it is off, and is handed no token, no limit and no field names
+     */
+    'upload' => $upload ? [
+      'enabled' => true,
+      'token' => isset($_SESSION['csrf']) ? $_SESSION['csrf'] : '',
+      'action' => UPLOAD_ACTION,
+      'fields' => [
+        'action' => UPLOAD_FIELD_ACTION,
+        'file' => UPLOAD_FIELD_FILE,
+        'token' => AUTH_FIELD_CSRF
+      ],
+      'extensions' => uploadAllowedExtensions(
+        $config['upload'], $config['extensions']
+      ),
+      /**
+       * The non-overridable lists, so the client can turn away a name the
+       * endpoint would refuse for an extension that is not the last one, such
+       * as `payload.php.jpg`. Nothing here is a secret: it is a fixed list,
+       * and the refusal happens server-side whether the client knows or not
+       */
+      'blocked' => array_values(array_merge(
+        UPLOAD_BLOCKED_EXTENSIONS, UPLOAD_ACTIVE_EXTENSIONS
+      )),
+      /**
+       * So the client can turn an oversized file away itself. A body past
+       * `post_max_size` is discarded before the script runs, which otherwise
+       * surfaces as an upload that fails with nothing useful to say
+       */
+      'maxSize' => uploadMaxSize($config['upload']),
+      'overwrite' => !empty($config['upload']['overwrite'])
+    ] : [
+      'enabled' => false
     ],
     'style' => [
       'themes' => [
@@ -3311,7 +4239,7 @@ $jsConfig = constructJsConfig(
   $config, $sorting, $indexer->timestamp, $bust, [
     'pool' => $themes,
     'current' => $currentTheme
-  ]
+  ], $uploadAvailable
 );
 ?>
 <!DOCTYPE HTML>

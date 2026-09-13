@@ -62,6 +62,8 @@ The releases and individual builds are available [here](https://git.five.sh/ivfi
 
 ### **Authentication**
 > Directories can be gated behind a sign-in form, with hashed credentials, a session cookie and lockout after repeated failures.
+### **Uploads**
+> Signed-in clients can drag files onto the listing to upload them into the directory they are viewing. Disabled by default, and only ever available where authentication covers the path.
 ### **Gallery Mode**
 > A gallery mode that allows you to view images and videos from the current directory in one place, as well as the ability to download files and perform reverse image searches.
 ### **Hover Previews**

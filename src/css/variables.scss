@@ -40,6 +40,20 @@ $gallery: (
   "width-list-selected-border": 5px
 );
 
+/* Upload queue and drop target */
+$upload: (
+  "color-background-drop": rgb(9 9 12 / 78%),
+  "color-border-drop": #3b4260,
+  "color-drop-text": #d6d3ce,
+  "color-background-panel": #16171d,
+  "color-border-panel": #22242d,
+  "color-border-item": #1d1f27,
+  "color-background-bar": #23252e,
+  "color-bar": #627be3,
+  "color-bar-done": #30c352,
+  "color-failed": #f45656
+);
+
 /* Font sizing */
 $font-sizing: (
   /* General */
