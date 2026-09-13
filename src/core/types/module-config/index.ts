@@ -44,6 +44,27 @@ export type TUserStorage = {
 };
 
 /**
+ * Upload settings, as the backend describes them.
+ *
+ * Everything past `enabled` is only sent to a client the server has already
+ * decided may upload, so the rest is absent whenever `enabled` is false
+ */
+export type TConfigUpload = {
+	enabled?: boolean;
+	token?: string;
+	action?: string;
+	fields?: {
+		action?: string;
+		file?: string;
+		token?: string;
+	};
+	extensions?: Array<string>;
+	/** Largest accepted file in bytes, where zero means no limit */
+	maxSize?: number;
+	overwrite?: boolean;
+};
+
+/**
  * Configuration object (from backend)
  */
 export interface IConfigData extends Omit<TUserStorage, 'style'> {
@@ -55,6 +76,7 @@ export interface IConfigData extends Omit<TUserStorage, 'style'> {
 			set?: boolean | string;
 		}
 	};
+	upload?: TConfigUpload;
 }
 
 /**

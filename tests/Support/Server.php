@@ -100,11 +100,14 @@ PHP);
     /**
      * @param array<string, string> $headers
      * @param array<string, string>|null $post Form fields, which make it a POST
+     * @param array<string, array{name: string, contents: string, type?: string}>|null $files
+     *        Uploads, keyed by field name, which make the body multipart
      */
     public function request(
         string $uri,
         array $headers = [],
-        ?array $post = null
+        ?array $post = null,
+        ?array $files = null
     ): Response {
         $socket = @fsockopen('127.0.0.1', $this->port, $errno, $errstr, 5);
 
@@ -112,17 +115,26 @@ PHP);
             throw new \RuntimeException("Could not connect to the server: {$errstr}");
         }
 
-        $body = $post === null ? '' : http_build_query($post);
+        if ($files !== null) {
+            $boundary = '----ivfi' . bin2hex(random_bytes(8));
+            $body = self::multipart($boundary, $post ?? [], $files);
+            $contentType = 'multipart/form-data; boundary=' . $boundary;
+        } else {
+            $body = $post === null ? '' : http_build_query($post);
+            $contentType = 'application/x-www-form-urlencoded';
+        }
+
+        $isPost = $post !== null || $files !== null;
 
         $request = sprintf(
             "%s %s HTTP/1.0\r\nHost: 127.0.0.1:%d\r\n",
-            $post === null ? 'GET' : 'POST',
+            $isPost ? 'POST' : 'GET',
             $uri,
             $this->port
         );
 
-        if ($post !== null) {
-            $request .= "Content-Type: application/x-www-form-urlencoded\r\n";
+        if ($isPost) {
+            $request .= sprintf("Content-Type: %s\r\n", $contentType);
             $request .= sprintf("Content-Length: %d\r\n", strlen($body));
         }
 
@@ -170,6 +182,42 @@ PHP);
         }
 
         return $response;
+    }
+
+    /**
+     * Builds a multipart body the way a browser would.
+     *
+     * Written out by hand rather than through a client library, because what
+     * these tests are checking is how the script reacts to a filename, and a
+     * library that sanitises the name on the way out would be testing itself.
+     *
+     * @param array<string, string> $fields
+     * @param array<string, array{name: string, contents: string, type?: string}> $files
+     */
+    private static function multipart(string $boundary, array $fields, array $files): string
+    {
+        $body = '';
+
+        foreach ($fields as $name => $value) {
+            $body .= "--{$boundary}\r\n";
+            $body .= "Content-Disposition: form-data; name=\"{$name}\"\r\n\r\n";
+            $body .= $value . "\r\n";
+        }
+
+        foreach ($files as $name => $file) {
+            $body .= "--{$boundary}\r\n";
+            $body .= sprintf(
+                "Content-Disposition: form-data; name=\"%s\"; filename=\"%s\"\r\n",
+                $name,
+                $file['name']
+            );
+            $body .= sprintf(
+                "Content-Type: %s\r\n\r\n", $file['type'] ?? 'application/octet-stream'
+            );
+            $body .= $file['contents'] . "\r\n";
+        }
+
+        return $body . "--{$boundary}--\r\n";
     }
 
     /**

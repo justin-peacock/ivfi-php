@@ -139,6 +139,93 @@ return array(
 ```
 This would apply authentication to `/protected/`, `/secret/` and `/directory/protected/`.
 
+## Upload
+Key: **`upload`**
+
+Lets a signed-in client drag files onto the listing to write them into the
+directory being viewed. Disabled by default.
+
+| Child key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `enabled` | Bool | `false` | Whether uploads are accepted at all. |
+| `extensions` | Bool/Array | `true` | The accepted extensions, as an allowlist. `true` follows whatever [`extensions`](#extensions) lists as image or video. |
+| `max_size` | Bool/Int | `false` | Largest accepted file in bytes. `false` follows the php.ini limits. |
+| `overwrite` | Bool | `false` | Whether an upload may replace a file that is already there. |
+| `restrict` | Bool/String | `false` | Applies uploads only to paths matching the expression, the way `authentication`'s own `restrict` does. |
+
+### Authentication is required
+
+Uploads follow [`authentication`](#authentication): the endpoint only exists for
+a request that already carries a signed-in session. An index with no users
+configured, or one whose `restrict` pattern leaves a path open, offers no upload
+on that path, and there is no flag that changes it.
+
+That is not caution for its own sake. The script writes into a directory the web
+server is already serving, so an accepted upload is not a file in a listing, it
+is potentially the next request's code. An anonymous write endpoint on a PHP
+host is a web shell waiting to be found.
+
+### What is accepted
+
+The extension check is an allowlist, and it is the last segment of the name that
+has to be on it. Two things happen regardless of what you configure:
+
+- Extensions the server is liable to execute (`.php` and its variants, `.phar`,
+  `.cgi`, `.pl`, `.py`, `.sh`, `.asp`, `.jsp`, `.shtml`) and files that
+  reconfigure it (`.htaccess`, `.user.ini`) are **always refused**, even if you
+  list one in `extensions`. Listing one is logged and ignored.
+- Every other extension in the name is checked too, so `payload.php.jpg` is
+  refused. Apache's `AddHandler` matches any extension in a name rather than the
+  last one, and on a host configured that way such a file is served as PHP.
+
+Beyond that: a leading dot is stripped, so an upload cannot create a dotfile; a
+name that describes a path is reduced to its last segment, so it cannot climb
+out of the directory; and a name that is not valid UTF-8 is refused rather than
+repaired.
+
+### Size limits
+
+One request per file, so PHP's own limits apply. `upload_max_filesize` and
+`post_max_size` both cap what arrives, and the smaller of the two, `max_size`
+included, is what the page tells the client so an oversized file is turned away
+before it is sent rather than after.
+
+The stock values are **2M** and **8M**, which is well under a video file. Raise
+them in `php.ini` (and `client_max_body_size` in nginx) for uploads of any size:
+
+```
+upload_max_filesize = 2G
+post_max_size = 2G
+max_execution_time = 600
+```
+
+### The directory has to be writable
+
+The uploaded file is written by the web server's user, so that user needs write
+permission on the directory being uploaded to. The file itself is then set to
+`0644`, because the mode a temporary upload carries follows the process umask
+and can otherwise leave the file unreadable to the server that has to serve it
+back.
+
+Example:
+```php
+<?php
+return array(
+    'authentication' => array(
+        'users' => array(
+            'username' => 'REPLACE WITH THE OUTPUT OF password_hash()'
+        )
+    ),
+    'upload' => array(
+        'enabled' => true,
+        'extensions' => array('jpg', 'jpeg', 'png', 'gif', 'webp', 'mp4', 'webm'),
+        'max_size' => 1073741824,
+        'overwrite' => false
+    )
+);
+?>
+```
+
 ## Format
 Key: **`format`**
 

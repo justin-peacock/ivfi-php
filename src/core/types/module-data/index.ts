@@ -28,6 +28,7 @@ type TDataComponents = {
 	main?: any;
 	gallery?: any;
 	settings?: any;
+	upload?: any;
 	bind?: {
 		load?: () => void;
 		unbind?: () => void;
