@@ -174,9 +174,18 @@ has to be on it. Two things happen regardless of what you configure:
   `.cgi`, `.pl`, `.py`, `.sh`, `.asp`, `.jsp`, `.shtml`) and files that
   reconfigure it (`.htaccess`, `.user.ini`) are **always refused**, even if you
   list one in `extensions`. Listing one is logged and ignored.
-- Every other extension in the name is checked too, so `payload.php.jpg` is
-  refused. Apache's `AddHandler` matches any extension in a name rather than the
-  last one, and on a host configured that way such a file is served as PHP.
+- Formats the **browser** treats as active are refused on the same terms:
+  `.svg`, `.html`, `.xhtml`, `.mhtml`, `.xml`, `.xsl`, `.swf`. The listing links
+  every file directly, and one of these opened as a document runs script in this
+  page's origin, which is the origin holding the session cookie of whoever opens
+  it. `svg` matters most, because it is an image everywhere else and is in the
+  default `extensions` list, so without this an allowlist of "images and video"
+  would quietly accept markup. It is dropped from the default silently; only an
+  `svg` you list yourself is logged.
+- Every other extension in the name is checked too, so `payload.php.jpg` and
+  `drawing.svg.jpg` are refused. Apache's `AddHandler` matches any extension in
+  a name rather than the last one, and on a host configured that way such a file
+  is served as PHP.
 
 Beyond that: a leading dot is stripped, so an upload cannot create a dotfile; a
 name that describes a path is reduced to its last segment, so it cannot climb
@@ -198,6 +207,20 @@ upload_max_filesize = 2G
 post_max_size = 2G
 max_execution_time = 600
 ```
+
+### Claiming a name
+
+An upload is staged under a dotfile name inside the directory it is bound for,
+then moved onto its real name in one operation: `link()` when `overwrite` is
+off, which fails outright if anything already holds the name, and `rename()`
+when it is on, which replaces the directory entry rather than writing through
+it. Two uploads racing for one name therefore end with one refused rather than
+one silently replaced, and a symlink appearing at the name is replaced rather
+than followed.
+
+On a filesystem with no hard links the no-overwrite path falls back to
+`rename()` and logs that it did, which keeps those deployments working with the
+guarantee narrowed to that one call.
 
 ### The directory has to be writable
 

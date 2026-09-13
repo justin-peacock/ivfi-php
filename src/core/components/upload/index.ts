@@ -16,11 +16,23 @@ import '../../../css/upload.scss';
  * One queued file and the row that reports on it
  */
 type TQueued = {
-	file: File;
+	/** Absent for a row that reports something that was never sendable */
+	file?: File;
 	row: HTMLElement;
 	bar: HTMLElement;
+	name: HTMLElement;
 	status: HTMLElement;
 };
+
+/**
+ * The instance the window listeners answer to.
+ *
+ * Single-page navigation replaces the document with `document.write()` and
+ * builds another component, but `window` and the listeners on it survive that.
+ * Without this, every instance an earlier navigation left behind handles the
+ * same drop, and one file is uploaded once per page the client has visited
+ */
+let live: componentUpload = null;
 
 /**
  * Drag and drop uploads into the directory currently being listed.
@@ -42,6 +54,8 @@ class componentUpload
 
 	private list: HTMLElement = null;
 
+	private close: HTMLElement = null;
+
 	private queue: Array<TQueued> = [];
 
 	private busy = false;
@@ -58,10 +72,20 @@ class componentUpload
 			return this;
 		}
 
+		live = this;
+
 		this.bind();
 
 		return this;
 	}
+
+	/**
+	 * Whether this instance is the one the current document built
+	 */
+	private isLive = (): boolean =>
+	{
+		return live === this;
+	};
 
 	/**
 	 * Whether a drag is carrying files.
@@ -72,6 +96,11 @@ class componentUpload
 	 */
 	private isDragged = (event: DragEvent): boolean =>
 	{
+		if(!this.isLive())
+		{
+			return false;
+		}
+
 		const types = event.dataTransfer ? event.dataTransfer.types : null;
 
 		if(!types)
@@ -139,6 +168,11 @@ class componentUpload
 		 */
 		eventHooks.listen(window, 'dragend', 'uploadDragEnd', () =>
 		{
+			if(!this.isLive())
+			{
+				return;
+			}
+
 			this.depth = 0;
 			this.hideOverlay();
 		});
@@ -204,21 +238,15 @@ class componentUpload
 
 	/**
 	 * Why a file cannot be sent, or null when it can
+	 *
+	 * Only refuses what the server refuses. A rule that lives here alone would
+	 * turn away a file the endpoint accepts, which is a worse failure than not
+	 * checking at all: it cannot be worked around, and nothing explains it
 	 */
 	private rejection = (file: File): string =>
 	{
 		const extensions = this.settings.extensions || [];
 		const maximum = this.settings.maxSize || 0;
-
-		/**
-		 * A directory arrives as a zero byte entry with no type, and a folder
-		 * drop is common enough to be worth naming rather than reporting as an
-		 * empty file the server turned down
-		 */
-		if(file.size === 0 && file.type === '')
-		{
-			return 'Folders and empty files are not accepted';
-		}
 
 		const parts = file.name.toLowerCase().split('.');
 
@@ -243,22 +271,72 @@ class componentUpload
 	};
 
 	/**
+	 * The names of the dropped entries that are directories.
+	 *
+	 * Read from `items` rather than inferred from `files`, where a directory
+	 * is indistinguishable from an empty file. It has to happen inside the drop
+	 * handler, because the list does not survive past it
+	 */
+	private droppedDirectories = (transfer: DataTransfer): Array<string> =>
+	{
+		const items = transfer && transfer.items ? Array.from(transfer.items) : [];
+		const names: Array<string> = [];
+
+		items.forEach((item: DataTransferItem) =>
+		{
+			if(item.kind !== 'file' || typeof item.webkitGetAsEntry !== 'function')
+			{
+				return;
+			}
+
+			const entry = item.webkitGetAsEntry();
+
+			if(entry && entry.isDirectory)
+			{
+				names.push(entry.name);
+			}
+		});
+
+		return names;
+	};
+
+	/**
 	 * Queues whatever was dropped
 	 */
 	private accept = (transfer: DataTransfer): void =>
 	{
 		const files = transfer && transfer.files ? Array.from(transfer.files) : [];
+		const directories = this.droppedDirectories(transfer);
 
-		if(files.length === 0)
+		if(files.length === 0 && directories.length === 0)
 		{
 			return;
 		}
 
 		this.createPanel();
+		this.updateClose();
+
+		/**
+		 * Named rather than skipped. A dropped folder otherwise produces either
+		 * nothing at all or a zero byte entry, and both read as the drop having
+		 * been ignored
+		 */
+		directories.forEach((name: string) =>
+		{
+			this.settle(
+				this.createRow(name), 'failed', 'Folders are not accepted'
+			);
+		});
 
 		files.forEach((file: File) =>
 		{
-			const queued = this.createRow(file);
+			/* A folder also reaches `files`, as an entry there is no point sending */
+			if(directories.includes(file.name))
+			{
+				return;
+			}
+
+			const queued = this.createRow(file.name, file);
 			const rejection = this.rejection(file);
 
 			if(rejection !== null)
@@ -284,12 +362,20 @@ class componentUpload
 			return;
 		}
 
-		const close = DOM.new('div', {
+		/**
+		 * A button rather than a styled div, so it takes focus and answers the
+		 * keyboard without any of that having to be reimplemented here
+		 */
+		const close = DOM.new('button', {
 			class : 'uploadClose',
-			title : 'Close'
+			type : 'button',
+			title : 'Close',
+			'aria-label' : 'Close the upload queue'
 		});
 
 		close.innerHTML = '&#10005;';
+
+		this.close = close;
 
 		const header = DOM.new('div', {
 			class : 'uploadHeader'
@@ -319,6 +405,17 @@ class componentUpload
 	 */
 	private dismiss = (): void =>
 	{
+		/**
+		 * Reloading mid-queue would abort the request in flight and drop
+		 * whatever is still waiting, so closing is held until the queue drains.
+		 * The button is disabled for as long as that is true, and this is the
+		 * same rule enforced where it can still be reached
+		 */
+		if(this.busy || this.queue.length > 0)
+		{
+			return;
+		}
+
 		if(this.wrote)
 		{
 			window.location.reload();
@@ -331,10 +428,30 @@ class componentUpload
 			this.panel.remove();
 			this.panel = null;
 			this.list = null;
+			this.close = null;
 		}
 	};
 
-	private createRow = (file: File): TQueued =>
+	/**
+	 * Reflects whether there is anything left to lose by closing
+	 */
+	private updateClose = (): void =>
+	{
+		if(!this.close)
+		{
+			return;
+		}
+
+		const running = this.busy || this.queue.length > 0;
+
+		(this.close as HTMLButtonElement).disabled = running;
+
+		this.close.setAttribute(
+			'title', running ? 'Uploads are still running' : 'Close'
+		);
+	};
+
+	private createRow = (label: string, file?: File): TQueued =>
 	{
 		const bar = DOM.new('div', {
 			class : 'uploadBarFill'
@@ -347,8 +464,8 @@ class componentUpload
 
 		const name = DOM.new('div', {
 			class : 'uploadName',
-			title : file.name,
-			text : file.name
+			title : label,
+			text : label
 		});
 
 		const meta = DOM.new('div', {
@@ -370,7 +487,24 @@ class componentUpload
 		row.append(meta, track);
 		this.list.append(row);
 
-		return { file, row, bar, status };
+		return { file, row, bar, name, status };
+	};
+
+	/**
+	 * Renames a row to whatever the server says it wrote.
+	 *
+	 * The endpoint sanitises the name it is given, so the row can otherwise be
+	 * left naming a file that is not on disk under that name
+	 */
+	private rename = (queued: TQueued, written: string): void =>
+	{
+		if(!written || written === queued.name.textContent)
+		{
+			return;
+		}
+
+		queued.name.textContent = written;
+		queued.name.setAttribute('title', written);
 	};
 
 	/**
@@ -406,6 +540,8 @@ class componentUpload
 
 		if(!queued)
 		{
+			this.updateClose();
+
 			/* The queue has drained: show the listing the uploads are missing from */
 			if(this.wrote && this.settled())
 			{
@@ -416,6 +552,7 @@ class componentUpload
 		}
 
 		this.busy = true;
+		this.updateClose();
 
 		this.send(queued, () =>
 		{
@@ -471,6 +608,10 @@ class componentUpload
 			let payload: {
 				ok?: boolean;
 				error?: string;
+				file?: {
+					name?: string;
+					size?: number;
+				};
 			} = null;
 
 			/**
@@ -489,6 +630,9 @@ class componentUpload
 			if(request.status === 201 && payload && payload.ok)
 			{
 				this.wrote = true;
+
+				/* The endpoint sanitises names, so the row follows what it wrote */
+				this.rename(queued, payload.file ? payload.file.name : null);
 
 				this.settle(queued, 'done', getReadableSize(
 					config.get('format').sizes, queued.file.size

@@ -240,7 +240,125 @@ final class UploadTest extends IndexerTestCase
             'htaccess'           => ['.htaccess'],
             'user ini'           => ['.user.ini'],
             'no extension'       => ['shell'],
+            /**
+             * Not executed by the server, but opened as a document it runs as
+             * this origin, which is the origin holding the session cookie.
+             * `svg` is in the default media extensions, so an allowlist of
+             * "images and video" would otherwise accept it
+             */
+            'svg'                => ['drawing.svg'],
+            'html'               => ['page.html'],
+            'xhtml'              => ['page.xhtml'],
+            'svg double'         => ['drawing.svg.jpg'],
+            /**
+             * Trimming whitespace and leading dots in separate passes left
+             * this as the dotfile `.htaccess`
+             */
+            'spaced dotfile'     => [' .htaccess'],
         ];
+    }
+
+    /**
+     * The default allowlist follows the media extensions, which carry `svg`.
+     * Active content is dropped from it rather than inherited.
+     */
+    public function testTheDefaultAllowlistDropsActiveContent(): void
+    {
+        $server = $this->serve();
+        $this->signIn($server);
+
+        $extensions = $this->jsConfig($server->request('/'))['upload']['extensions'] ?? [];
+
+        $this->assertContains('jpg', $extensions);
+        $this->assertNotContains('svg', $extensions, 'svg reached the upload allowlist');
+    }
+
+    /**
+     * Leading whitespace used to survive long enough for the dot strip to miss
+     * it, leaving a dotfile behind under a name the allowlist accepts.
+     */
+    public function testWhitespaceCannotSmuggleInADotfile(): void
+    {
+        $server = $this->serve();
+        $token = $this->signIn($server);
+
+        [, $payload] = $this->upload($server, $token, ' .secret.jpg', 'x');
+
+        $this->assertTrue($payload['ok'] ?? false);
+        $this->assertSame('secret.jpg', $payload['file']['name'] ?? null);
+        $this->assertFileExists($this->root() . '/secret.jpg');
+        $this->assertFileDoesNotExist($this->root() . '/.secret.jpg');
+    }
+
+    /**
+     * A `post_max_size` the multipart envelope alone exhausts used to compute
+     * an effective maximum of zero, which every caller reads as "no limit".
+     */
+    public function testATinyPostLimitDoesNotBecomeNoLimit(): void
+    {
+        $fixture = new Fixture('upload-tiny-post');
+        $fixture->config([
+            'upload' => ['enabled' => true],
+            'authentication' => [
+                'users' => [self::USER => password_hash(self::PASS, PASSWORD_DEFAULT)],
+                'throttle_path' => $fixture->root(),
+            ],
+        ]);
+
+        $server = new Server($fixture, [
+            'post_max_size' => '4K',
+            'upload_max_filesize' => '2M',
+        ]);
+
+        $this->servers[] = $server;
+        $this->fixtures[] = $fixture;
+
+        $token = $this->signIn($server);
+        $maximum = $this->jsConfig($server->request('/'))['upload']['maxSize'] ?? null;
+
+        $this->assertIsInt($maximum);
+        $this->assertGreaterThan(
+            0, $maximum, 'the most restrictive configuration there is reported no limit'
+        );
+
+        [, $payload] = $this->upload($server, $token, 'holiday.jpg', str_repeat('a', 64));
+
+        $this->assertFalse($payload['ok'] ?? false);
+    }
+
+    /**
+     * The no-overwrite rule is enforced by the operation that claims the name,
+     * not by the check before it, so a name taken between the two is refused
+     * rather than replaced.
+     */
+    public function testANameTakenAfterTheCheckIsStillNotOverwritten(): void
+    {
+        $server = $this->serve();
+        $token = $this->signIn($server);
+
+        /* Two uploads of one name: exactly one may land */
+        [, $first] = $this->upload($server, $token, 'race.jpg', 'first');
+        [, $second] = $this->upload($server, $token, 'race.jpg', 'second');
+
+        $this->assertTrue($first['ok'] ?? false);
+        $this->assertFalse($second['ok'] ?? false);
+        $this->assertSame('first', file_get_contents($this->root() . '/race.jpg'));
+    }
+
+    /**
+     * Staging happens inside the target directory, so a failed upload must not
+     * leave its working file behind.
+     */
+    public function testARefusedUploadLeavesNoStagedFile(): void
+    {
+        $server = $this->serve();
+        $token = $this->signIn($server);
+
+        $this->upload($server, $token, 'existing.jpg', 'replacement');
+
+        $staged = glob($this->root() . '/.ivfi-upload-*') ?: [];
+
+        $this->assertSame([], $staged, 'a staged upload was left behind');
     }
 
     /**

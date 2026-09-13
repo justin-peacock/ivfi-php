@@ -665,6 +665,21 @@ define('UPLOAD_BLOCKED_EXTENSIONS', [
   'cgi', 'fcgi', 'pl', 'py', 'rb', 'sh', 'bash',
   'asp', 'aspx', 'ashx', 'asmx', 'cer', 'jsp', 'jspx', 'shtml', 'shtm'
 ]);
+/**
+ * Extensions that are never accepted because of what the *browser* does with
+ * them, rather than the server.
+ *
+ * The listing links every file directly, and one of these opened as a document
+ * runs script in this page's origin: the origin holding the session cookie of
+ * whoever opens it. An SVG is the one that matters in practice, because it is
+ * an image everywhere else and is in the default media extensions, so without
+ * this an upload allowlist of "images and video" quietly accepts markup that
+ * can act as the next visitor
+ */
+define('UPLOAD_ACTIVE_EXTENSIONS', [
+  'svg', 'svgz', 'html', 'htm', 'xhtml', 'xht', 'mhtml', 'mht',
+  'xml', 'xsl', 'xslt', 'swf'
+]);
 
 /**
  * The first value of a possibly chained forwarding header
@@ -1296,6 +1311,19 @@ function authenticate($users, $realm, $options = [])
 }
 
 /**
+ * Whether an extension is refused whatever the allowlist says
+ *
+ * @param String  $extension  A lowercase extension, without the dot
+ *
+ * @return Boolean
+ */
+function uploadIsRefusedExtension($extension)
+{
+  return in_array($extension, UPLOAD_BLOCKED_EXTENSIONS, true)
+    || in_array($extension, UPLOAD_ACTIVE_EXTENSIONS, true);
+}
+
+/**
  * Parses a php.ini size value such as `8M` or `1G` into bytes
  *
  * @param String  $value  The ini value
@@ -1351,7 +1379,7 @@ function uploadMaxSize($options)
   /* The file is only part of the body, so the envelope comes out of the same budget */
   if($post > 0)
   {
-    $limits[] = max(0, $post - UPLOAD_ENVELOPE_BYTES);
+    $limits[] = $post - UPLOAD_ENVELOPE_BYTES;
   }
 
   if(isset($options['max_size'])
@@ -1361,7 +1389,20 @@ function uploadMaxSize($options)
     $limits[] = $options['max_size'];
   }
 
-  return $limits === [] ? 0 : min($limits);
+  if($limits === [])
+  {
+    return 0;
+  }
+
+  $smallest = min($limits);
+
+  /**
+   * A `post_max_size` the envelope alone exhausts leaves nothing for a file.
+   * Reported as one byte rather than as zero, because zero is what every
+   * caller here reads as "nothing limits this" — returning it would turn the
+   * most restrictive configuration there is into no limit at all
+   */
+  return $smallest > 0 ? $smallest : 1;
 }
 
 /**
@@ -1379,6 +1420,13 @@ function uploadMaxSize($options)
 function uploadAllowedExtensions($options, $extensions)
 {
   $allowed = isset($options['extensions']) ? $options['extensions'] : true;
+
+  /**
+   * Whether this list was written by the operator. The media extensions are
+   * not: they carry `svg`, which is refused below, and complaining about a
+   * default on every request would be noise in the log rather than a finding
+   */
+  $configured = $allowed !== true;
 
   /* `true` follows whatever the index already treats as media */
   if($allowed === true)
@@ -1419,15 +1467,19 @@ function uploadAllowedExtensions($options, $extensions)
     }
 
     /**
-     * The blocklist wins over the configuration. An operator who lists `php`
+     * The blocklists win over the configuration. An operator who lists `php`
      * here has written an upload form for a web shell, and the likeliest way
      * for that to happen is a list copied from somewhere else
      */
-    if(in_array($extension, UPLOAD_BLOCKED_EXTENSIONS, true))
+    if(uploadIsRefusedExtension($extension))
     {
-      error_log(sprintf(
-        'IVFi: refusing to accept .%s uploads, which the server may execute', $extension
-      ));
+      if($configured)
+      {
+        error_log(sprintf(
+          'IVFi: refusing to accept .%s uploads, which can run as this origin',
+          $extension
+        ));
+      }
 
       continue;
     }
@@ -1477,9 +1529,13 @@ function uploadSafeName($name)
    */
   $name = rtrim($name, " \t.");
 
-  /* A leading dot would make it a dotfile: `.htaccess`, `.user.ini`, `.ivfi` */
-  $name = ltrim($name, '.');
-  $name = trim($name);
+  /**
+   * Leading dots make a dotfile (`.htaccess`, `.user.ini`, `.ivfi`), and they
+   * are taken together with the whitespace rather than after it: trimming the
+   * two in separate passes leaves ` .secret.jpg` as a dotfile, because the
+   * leading character at the point the dots are stripped is a space
+   */
+  $name = ltrim($name, " \t.");
 
   if($name === '' || $name === '.' || $name === '..')
   {
@@ -1532,7 +1588,7 @@ function uploadNameRejection($name, $allowed)
    */
   foreach($segments as $segment)
   {
-    if(in_array($segment, UPLOAD_BLOCKED_EXTENSIONS, true))
+    if(uploadIsRefusedExtension($segment))
     {
       return 'That name carries an extension the server may execute.';
     }
@@ -1817,9 +1873,16 @@ function handleUpload($indexer, $config, $available)
     ]);
   }
 
+  $overwrite = !empty($config['upload']['overwrite']);
+
+  /**
+   * A cheap early answer, so the common case of a name already taken does not
+   * pay for the move first. It is not what enforces the rule: that is the
+   * `link()` below, because anything decided here can change before the write
+   */
   if(file_exists($target) || is_link($target))
   {
-    if(empty($config['upload']['overwrite']))
+    if(!$overwrite)
     {
       uploadRespond(409, [
         'ok' => false,
@@ -1851,7 +1914,24 @@ function handleUpload($indexer, $config, $available)
     ]);
   }
 
-  if(!move_uploaded_file($file['tmp_name'], $target))
+  /**
+   * Staged under a name of this script's choosing, inside the directory it is
+   * bound for, so that the step which claims the real name is a single
+   * operation on one filesystem. Moving straight to the target instead would
+   * leave a window between the checks above and the write in which another
+   * request creates the file, or swaps a symlink in at the name:
+   * `move_uploaded_file()` overwrites what it finds and follows where it
+   * points.
+   *
+   * The staging name is a dotfile, which the listing skips, so a request
+   * arriving mid-upload never sees a partial file
+   */
+  $staged = sprintf(
+    '%s%s.ivfi-upload-%s.part',
+    $directory, DIRECTORY_SEPARATOR, bin2hex(random_bytes(8))
+  );
+
+  if(!move_uploaded_file($file['tmp_name'], $staged))
   {
     error_log(sprintf('IVFi: could not move an upload into %s', $directory));
 
@@ -1864,9 +1944,72 @@ function handleUpload($indexer, $config, $available)
   /**
    * `move_uploaded_file()` carries the temporary file's mode over, which
    * follows the process umask and can leave the file unreadable to the very
-   * server that is meant to serve it back
+   * server that is meant to serve it back. Set here rather than after the
+   * rename, so the file is never readable at its real name with the wrong mode
    */
-  @chmod($target, 0644);
+  @chmod($staged, 0644);
+
+  if($overwrite)
+  {
+    /**
+     * `rename()` replaces the directory entry itself rather than writing
+     * through it, so a symlink that appeared at the name since the check above
+     * is replaced rather than followed
+     */
+    if(!@rename($staged, $target))
+    {
+      @unlink($staged);
+
+      error_log(sprintf('IVFi: could not rename an upload into place in %s', $directory));
+
+      uploadRespond(500, [
+        'ok' => false,
+        'error' => 'The file could not be written.'
+      ]);
+    }
+  } else if(!@link($staged, $target))
+  {
+    /**
+     * `link()` is the atomic claim on a name: it fails outright when anything
+     * already holds it, a symlink or a directory included, which is what makes
+     * "do not overwrite" a guarantee rather than the result of a check that
+     * another request can invalidate
+     */
+    $taken = file_exists($target) || is_link($target);
+
+    if(!$taken && @rename($staged, $target))
+    {
+      /**
+       * Some filesystems do not carry hard links at all. Falling back keeps
+       * those deployments working, at the cost of the guarantee narrowing back
+       * to the window this rename occupies
+       */
+      error_log(sprintf(
+        'IVFi: %s does not support hard links, so uploads there cannot claim a name atomically',
+        $directory
+      ));
+    } else {
+      @unlink($staged);
+
+      if($taken)
+      {
+        uploadRespond(409, [
+          'ok' => false,
+          'error' => 'A file with that name is already here.'
+        ]);
+      }
+
+      error_log(sprintf('IVFi: could not link an upload into place in %s', $directory));
+
+      uploadRespond(500, [
+        'ok' => false,
+        'error' => 'The file could not be written.'
+      ]);
+    }
+  } else {
+    /* The link is the file now, so the staged name is just another reference */
+    @unlink($staged);
+  }
 
   uploadRespond(201, [
     'ok' => true,
