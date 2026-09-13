@@ -229,7 +229,7 @@ main.dates.apply = (offset: MComponentMain.TDateOffset, format = true) =>
 	const dateFormat: Array<string> = config.get('format.date');
 	const dateSelector = 'tr.directory > td:nth-child(2), tr.file > td[data-raw]:nth-child(2)';
 
-	(selector.use('TABLE') as HTMLElement).querySelectorAll(
+	(selector.use('TABLE') as HTMLElement).querySelectorAll<HTMLTableCellElement>(
 		dateSelector
 	).forEach((item: HTMLTableCellElement) =>
 	{
@@ -461,10 +461,11 @@ main.getTableItems = () =>
 /**
  * Sorts a column
  */
-main.sortTableColumn = (target: HTMLTableCellElement) =>
+main.sortTableColumn = (target: HTMLElement) =>
 {
 	const parent: HTMLTableCellElement = target.closest('th');
-	const column: MComponentMain.ISortRow = !(target.tagName === 'TH') ? parent : target;
+	/* Narrowed by the tagName check: a `<th>` target genuinely is a table cell */
+	const column: MComponentMain.ISortRow = !(target.tagName === 'TH') ? parent : (target as HTMLTableCellElement);
 	const columnIndex: number = DOM.getIndex(column);
 
 	const rows: {
