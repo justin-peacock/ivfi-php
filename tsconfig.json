@@ -9,9 +9,9 @@
         // this every installed @types/* is pulled in, including @types/node,
         // whose newer releases use syntax this TypeScript cannot parse.
         "types": ["modernizr"],
-        // Enabled because they already pass. The rest of the strict family is
-        // staged work, see docs/building.md: strictNullChecks is 801 errors
-        // on TypeScript 5.9.
+        // Enabled because they already pass. strictNullChecks is the only
+        // remaining strict-family flag, staged work tracked in
+        // docs/building.md: it's 774 errors on TypeScript 5.9.
         "strictBindCallApply": true,
         "noImplicitReturns": true,
         "strictFunctionTypes": true,
