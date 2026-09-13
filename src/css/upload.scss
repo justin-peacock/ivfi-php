@@ -68,18 +68,13 @@ html > body > div.uploadPanel {
       color: map.get(variables.$root, "color-a-file");
       background: none;
 
-      &:hover:not(:disabled) {
+      &:hover {
         color: map.get(variables.$root, "color-header-table");
       }
 
       &:focus-visible {
         outline: 1px solid map.get(variables.$upload, "color-bar");
         outline-offset: 2px;
-      }
-
-      &:disabled {
-        cursor: default;
-        opacity: 0.4;
       }
     }
   }

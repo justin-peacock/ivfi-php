@@ -71,6 +71,9 @@ class componentUpload
 	/** The directory the current batch was dropped on */
 	private target: string = null;
 
+	/** The request in flight, so that closing can stop it */
+	private request: XMLHttpRequest = null;
+
 	constructor()
 	{
 		this.settings = config.get('upload') || {};
@@ -271,6 +274,25 @@ class componentUpload
 	};
 
 	/**
+	 * A byte count in a form that says something.
+	 *
+	 * `getReadableSize()` starts at KiB, so anything under about half of one
+	 * rounds to `0 KiB` — including the deliberate one-byte floor, which would
+	 * have the client refusing files for being "larger than the 0 KiB limit"
+	 */
+	private readable = (bytes: number): string =>
+	{
+		const sizes = config.get('format').sizes;
+
+		if(bytes < 1024)
+		{
+			return `${bytes}${sizes[0]}`.trim();
+		}
+
+		return getReadableSize(sizes, bytes).trim();
+	};
+
+	/**
 	 * The name the endpoint would write, as far as the parts that decide
 	 * whether it is accepted.
 	 *
@@ -333,14 +355,13 @@ class componentUpload
 
 		if(parts.slice(1, -1).some((part: string) => blocked.includes(part)))
 		{
-			return 'That name carries an extension the server may execute';
+			/* Not "may execute": the same list covers `.svg` and friends */
+			return 'That name carries an extension that is not accepted here';
 		}
 
 		if(maximum > 0 && file.size > maximum)
 		{
-			return `Larger than the ${getReadableSize(
-				config.get('format').sizes, maximum
-			).trim()} limit`;
+			return `Larger than the ${this.readable(maximum)} limit`;
 		}
 
 		return null;
@@ -501,12 +522,30 @@ class componentUpload
 	{
 		/**
 		 * Reloading mid-queue would abort the request in flight and drop
-		 * whatever is still waiting, so closing is held until the queue drains.
-		 * The button is disabled for as long as that is true, and this is the
-		 * same rule enforced where it can still be reached
+		 * whatever is still waiting, so closing asks first rather than doing it
+		 * silently.
+		 *
+		 * Asking rather than refusing, because a request can stall without ever
+		 * completing: `XMLHttpRequest` has no timeout by default, and its only
+		 * endings here are load, error and abort. A button that simply stayed
+		 * disabled would leave the queue wedged with nothing the client could
+		 * do about it
 		 */
 		if(this.busy || this.queue.length > 0)
 		{
+			if(!window.confirm('Uploads are still running. Stop them?'))
+			{
+				return;
+			}
+
+			this.queue = [];
+
+			if(this.request)
+			{
+				/* Settles the current row and drains what is left of the queue */
+				this.request.abort();
+			}
+
 			return;
 		}
 
@@ -529,7 +568,7 @@ class componentUpload
 	};
 
 	/**
-	 * Reflects whether there is anything left to lose by closing
+	 * Says what closing would do, without ever taking the option away
 	 */
 	private updateClose = (): void =>
 	{
@@ -540,10 +579,12 @@ class componentUpload
 
 		const running = this.busy || this.queue.length > 0;
 
-		(this.close as HTMLButtonElement).disabled = running;
-
 		this.close.setAttribute(
-			'title', running ? 'Uploads are still running' : 'Close'
+			'title', running ? 'Stop uploading and close' : 'Close'
+		);
+		this.close.setAttribute(
+			'aria-label',
+			running ? 'Stop uploading and close the upload queue' : 'Close the upload queue'
 		);
 	};
 
@@ -722,6 +763,8 @@ class componentUpload
 
 		const request = new XMLHttpRequest();
 
+		this.request = request;
+
 		queued.row.classList.add('active');
 		queued.status.textContent = '0%';
 
@@ -743,6 +786,8 @@ class componentUpload
 
 		request.addEventListener('load', () =>
 		{
+			this.request = null;
+
 			queued.row.classList.remove('active');
 
 			let payload: {
@@ -774,9 +819,7 @@ class componentUpload
 				/* The endpoint sanitises names, so the row follows what it wrote */
 				this.rename(queued, payload.file ? payload.file.name : null);
 
-				this.settle(queued, 'done', getReadableSize(
-					config.get('format').sizes, queued.file.size
-				).trim());
+				this.settle(queued, 'done', this.readable(queued.file.size));
 			} else if(payload && payload.error)
 			{
 				this.settle(queued, 'failed', payload.error);
@@ -792,6 +835,8 @@ class componentUpload
 
 		request.addEventListener('error', () =>
 		{
+			this.request = null;
+
 			queued.row.classList.remove('active');
 			this.settle(queued, 'failed', 'The connection failed');
 
@@ -800,6 +845,8 @@ class componentUpload
 
 		request.addEventListener('abort', () =>
 		{
+			this.request = null;
+
 			queued.row.classList.remove('active');
 			this.settle(queued, 'failed', 'Cancelled');
 

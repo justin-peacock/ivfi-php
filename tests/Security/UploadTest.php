@@ -477,6 +477,46 @@ final class UploadTest extends IndexerTestCase
     }
 
     /**
+     * PHP's ini shorthand is K, M and G only: it rejects `T` outright, warning
+     * that it is an unknown multiplier and reading the value as its leading
+     * digits. The parser follows that rather than being more generous, because
+     * a page reporting 1 TB while the engine enforces one byte would refuse
+     * every upload with a limit the client was told it was under.
+     */
+    public function testAnUnknownIniMultiplierIsReadTheWayPhpReadsIt(): void
+    {
+        $fixture = new Fixture('upload-ini-suffix');
+        $fixture->config([
+            'upload' => ['enabled' => true],
+            'authentication' => [
+                'users' => [self::USER => password_hash(self::PASS, PASSWORD_DEFAULT)],
+                'throttle_path' => $fixture->root(),
+            ],
+        ]);
+
+        /**
+         * On `upload_max_filesize` rather than `post_max_size`, which would be
+         * read as one byte for the whole request and leave even the sign-in
+         * form too large to submit
+         */
+        $server = new Server($fixture, ['upload_max_filesize' => '1T']);
+
+        $this->servers[] = $server;
+        $this->fixtures[] = $fixture;
+
+        $this->signIn($server);
+
+        $maximum = $this->jsConfig($server->request('/'))['upload']['maxSize'] ?? null;
+
+        /* One byte, the same as what PHP itself made of `1T` */
+        $this->assertSame(
+            1,
+            $maximum,
+            'the page reported a limit the engine does not enforce'
+        );
+    }
+
+    /**
      * The client is told the non-overridable lists, so a name the endpoint
      * refuses for an extension that is not the last one can be turned away
      * before it is uploaded rather than after.

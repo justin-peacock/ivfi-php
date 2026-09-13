@@ -1590,7 +1590,12 @@ function uploadNameRejection($name, $allowed)
   {
     if(uploadIsRefusedExtension($segment))
     {
-      return 'That name carries an extension the server may execute.';
+      /**
+       * Deliberately not "the server may execute": this covers the active
+       * content list too, and an `.svg` is refused for what the browser does
+       * with it rather than the server
+       */
+      return 'That name carries an extension that is not accepted here.';
     }
   }
 
@@ -2026,6 +2031,14 @@ function handleUpload($indexer, $config, $available)
      * "do not overwrite" a guarantee rather than the result of a check that
      * another request can invalidate
      */
+    /**
+     * The early check above stat'ed this path and PHP caches that per request,
+     * so without clearing it the answer here can be the one from before the
+     * upload was staged. A name another request claimed in between would read
+     * as free, and the fallback below would rename straight over it
+     */
+    clearstatcache(true, $target);
+
     $taken = file_exists($target) || is_link($target);
 
     if(!$taken && @rename($staged, $target))
