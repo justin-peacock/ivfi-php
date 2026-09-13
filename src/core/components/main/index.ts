@@ -466,7 +466,7 @@ main.getTableItems = () =>
 				items.push({
 					url: url,
 					name: parent.getAttribute('data-raw'),
-					size: container.querySelector('td:nth-child(3)').innerHTML
+					size: container.querySelector('td:nth-child(3)').textContent
 				});
 			}
 		});
