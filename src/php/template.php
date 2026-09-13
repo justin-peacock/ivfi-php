@@ -1434,6 +1434,16 @@ if($config['style']['themes']['path'])
   ));
 }
 
+/**
+ * The units are indexed by magnitude, so an empty or non-array value would
+ * leave every size without a unit and warn on each one. Fall back to the
+ * documented list rather than propagating that to the page and the client
+ */
+if(!is_array($config['format']['sizes']) || $config['format']['sizes'] === [])
+{
+  $config['format']['sizes'] = $defaults['format']['sizes'];
+}
+
 if(!is_array($config['format']['date']))
 {
   $config['format']['date'] = [is_string($config['format']['date'])

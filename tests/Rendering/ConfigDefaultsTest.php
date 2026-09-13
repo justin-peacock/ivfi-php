@@ -80,4 +80,36 @@ final class ConfigDefaultsTest extends IndexerTestCase
         $this->assertSame('', $response->stderr, 'formatting emitted errors');
         $this->assertStringContainsString('<td data-raw="2048">2048 B</td>', $response->rows());
     }
+
+    /**
+     * An empty list has no unit to fall back on, so the documented units are
+     * used instead of warning on every size and handing the client nothing.
+     *
+     * @return array<string, array{mixed}>
+     */
+    public static function unusableUnitLists(): array
+    {
+        return [
+            'empty array' => [[]],
+            'a string'    => ['B'],
+            'false'       => [false],
+        ];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('unusableUnitLists')]
+    public function testUnusableUnitListFallsBackToTheDefaults(mixed $sizes): void
+    {
+        $fixture = new Fixture('defaults-nounits');
+        $fixture->file('big.bin', str_repeat('a', 2048));
+        $fixture->config(['format' => ['sizes' => $sizes]]);
+
+        $response = Indexer::render($fixture);
+
+        $this->assertSame('', $response->stderr, 'formatting emitted errors');
+        $this->assertStringContainsString('<td data-raw="2048">2 KiB</td>', $response->rows());
+        $this->assertSame(
+            [' B', ' KiB', ' MiB', ' GiB', ' TiB'],
+            $response->jsConfig()['format']['sizes']
+        );
+    }
 }

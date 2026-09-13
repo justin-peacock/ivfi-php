@@ -23,8 +23,8 @@ A basic example of a config file:
 return array(
     'authentication' => array(
         'users' => array(
-            /* A password_hash() value, see Authentication below */
-            'username' => '$2y$12$abcdefghijklmnopqrstuv...'
+            /* Not a real hash: generate one, see Authentication below */
+            'username' => 'REPLACE WITH THE OUTPUT OF password_hash()'
         ),
         'restrict' => '/^\/(protected|secret|directory\/protected)\/?/i'
     ),
@@ -129,7 +129,8 @@ Example:
 return array(
     'authentication' => array(
         'users' => array(
-            'username' => '$2y$12$abcdefghijklmnopqrstuv...'
+            /* Not a real hash: generate one with the command above */
+            'username' => 'REPLACE WITH THE OUTPUT OF password_hash()'
         ),
         'restrict' => '/^\/(protected|secret|directory\/protected)\/?/i'
     )
