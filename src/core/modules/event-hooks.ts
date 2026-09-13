@@ -17,7 +17,7 @@ const getEvents = (events: Array<string> | string) =>
  */
 const objHas = (obj: undefined | object, path: string): boolean =>
 {
-	let level: Array<string> | string | null | undefined = null,
+	let level: Array<string> | string | null | undefined,
 		rest: Array<string> = [];
 
 	if(!path.includes('.'))

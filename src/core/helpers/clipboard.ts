@@ -24,7 +24,7 @@ export const clipboardCopy = (text: string): void =>
 				type: 'Fallback',
 				successful: successful
 			});
-		} catch (err) {
+		} catch {
 			console.log('clipboardCopy', {
 				type: 'Fallback',
 				successful: false

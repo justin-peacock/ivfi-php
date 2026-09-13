@@ -106,7 +106,7 @@ user.get = (): TUserStorage =>
 		{
 			user.set(client);
 		}
-	} catch (e: unknown)
+	} catch
 	{
 		/* On error means that the client does not have a valid cookie, so we're creating it */
 		client = {};

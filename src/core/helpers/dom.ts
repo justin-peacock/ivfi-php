@@ -34,7 +34,7 @@ type TDomStructure = {
 		) => void;
 	};
 	getIndex: (element: HTMLElement) => number;
-}
+};
 
 /**
  * Manipulates the DOM

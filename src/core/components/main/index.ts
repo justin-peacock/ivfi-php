@@ -326,7 +326,7 @@ main.sort.load = () =>
 		if(sortingTypes === 0 || sortingTypes === 1)
 		{
 			const asc = (config.get('sorting.order') === 'asc' ? true : false);
-			let index = null;
+			let index: number;
 
 			switch(config.get('sorting.sortBy'))
 			{

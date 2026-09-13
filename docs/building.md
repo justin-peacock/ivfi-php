@@ -103,11 +103,17 @@ a guess:
 | `noImplicitThis` | 104 |
 | `noImplicitAny` | 233 |
 | `strictNullChecks` | 805 |
-| `strict` (all of the above together) | 1122 |
+| `strict` | 1122 |
+
+`strict` is TypeScript's umbrella flag, measured on its own. It does not
+include `noImplicitReturns`, and it switches on `alwaysStrict`,
+`strictPropertyInitialization` and `useUnknownInCatchVariables` as well as the
+rows above, so its count is not the sum of them.
 
 `strictNullChecks` could not be measured before the compiler was upgraded,
-because TypeScript 4.8 crashed on this source with an internal error rather
-than reporting diagnostics. It is by far the largest item.
+because TypeScript 4.9, the version the lockfile held, crashed on this source
+with an internal `TypeError` in the checker rather than reporting
+diagnostics. It is by far the largest item.
 
 A sensible order is `noImplicitReturns`, `strictFunctionTypes`,
 `noImplicitThis`, `noImplicitAny`, then `strictNullChecks`, one flag per change

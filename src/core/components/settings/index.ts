@@ -532,7 +532,7 @@ export class componentSettings
 	private boundEvents: {
 		selector?: any;
 		events?: Array<string>;
-	}
+	};
 
 	constructor()
 	{
@@ -549,7 +549,7 @@ export class componentSettings
 		}
 
 		return false;
-	}
+	};
 
 	/**
 	 * Apply settings (gather and set settings, then close menu)
@@ -563,7 +563,7 @@ export class componentSettings
 		/** Call functions on settings applied */
 		data.components.settings.close();
 		data.layer.main.update();
-	}
+	};
 
 	/**
 	 * Close settings menu
@@ -585,7 +585,7 @@ export class componentSettings
 		document.body.querySelectorAll(
 			':scope > div.focusOverlay, :scope > div.settingsContainer'
 		).forEach((element) => element.remove());
-	}
+	};
 
 	getSectionGallery = (section = create.section('gallery'), settings = 0) =>
 	{
@@ -653,7 +653,7 @@ export class componentSettings
 			settings,
 			section
 		};
-	}
+	};
 
 	getSectionMain = (section: HTMLElement = create.section('main'), settings = 0) =>
 	{
@@ -734,14 +734,14 @@ export class componentSettings
 			settings,
 			section
 		};
-	}
+	};
 
 	removeOnUnbind = ({ selector, events, id }) =>
 	{
 		this.boundEvents[id] = {
 			selector, events
 		};
-	}
+	};
 
 	/**
 	 * Create and show the settings menu
@@ -851,5 +851,5 @@ export class componentSettings
 				onAdd: this.removeOnUnbind
 			});
 		});
-	}
+	};
 }

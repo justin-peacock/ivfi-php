@@ -75,7 +75,7 @@ export default class optimizeClass
 
 		this.enabled = false;
 		this.setup();
-	}
+	};
 
 	/**
 	 * Initiate the variables and set required data
@@ -175,7 +175,7 @@ export default class optimizeClass
 		this.attemptRefresh();
 
 		return this.initiated;
-	}
+	};
 
 	/**
 	 * Called after table manipulation
@@ -287,7 +287,7 @@ export default class optimizeClass
 		this.refresh();
 
 		return true;
-	}
+	};
 
 	public setVisibleFlag = (item: TOptimizeRowItem, state: boolean): boolean =>
 	{
@@ -295,7 +295,7 @@ export default class optimizeClass
 		this.activeHasChanged = true;
 
 		return state;
-	}
+	};
 
 	private sortLogic = (sort: number, a: TOptimizeCachedRowItem, b: TOptimizeCachedRowItem): any =>
 	{
@@ -307,7 +307,7 @@ export default class optimizeClass
 				|| '' : b.value
 				|| '').localeCompare(sort ? b.value || '' : a.value || '');
 		}
-	}
+	};
 
 	public sortRows = (column = 0, order = 'asc'): Array<TOptimizeRowItem> =>
 	{
@@ -359,7 +359,7 @@ export default class optimizeClass
 		log('optimize', `Sorted items in ${performance.now() - measureStart} ms.`);
 
 		return this.rows;
-	}
+	};
 
 	/**
 	 * Calculates the active index range
@@ -374,7 +374,7 @@ export default class optimizeClass
 		const limit: number = (start + (margin * 2)) + negative;
 
 		return [start, limit];
-	}
+	};
 
 	/**
 	 * Gets the active rows and their indexes from stored rows
@@ -406,7 +406,7 @@ export default class optimizeClass
 		}
 
 		return this.activeData;
-	}
+	};
 
 	/**
 	 * Scans the strcture for the closest element from origin
@@ -424,7 +424,7 @@ export default class optimizeClass
 		}
 
 		return index;
-	}
+	};
 
 	/**
 	 * Find index relative to the active rows
@@ -446,7 +446,7 @@ export default class optimizeClass
 		}
 
 		return relative;
-	}
+	};
 
 	private setRows = (index: number, rows: Array<TOptimizeRowItem>, margin: number): {
 		visible: number,
@@ -511,7 +511,7 @@ export default class optimizeClass
 		log('optimize', { visible, hidden, updated });
 
 		return { visible, hidden, updated };
-	}
+	};
 
 	/**
 	 * Hides rows that are out of view - called on scroll, resize and so on
@@ -570,7 +570,7 @@ export default class optimizeClass
 				reject();
 			}
 		});
-	}
+	};
 
 	public attemptRefresh = (): void =>
 	{
@@ -591,5 +591,5 @@ export default class optimizeClass
 				this.refreshing = false;
 			});
 		}
-	}
+	};
 }

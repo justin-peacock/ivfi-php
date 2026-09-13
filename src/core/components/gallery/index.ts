@@ -33,7 +33,7 @@ export class componentGallery
 		});
 
 		return source;
-	}
+	};
 
 	public load = (index = 0): void | boolean =>
 	{
@@ -173,5 +173,5 @@ export class componentGallery
 
 			});
 		}
-	}
+	};
 }

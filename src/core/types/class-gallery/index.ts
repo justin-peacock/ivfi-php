@@ -71,7 +71,7 @@ export type TGalleryDataActive = {
  */
 export type TGalleryTableItem = {
 	name: string;
-    url?: string;
+	url?: string;
 	size?: number;
 	dimensions?: {
 		height: number;
