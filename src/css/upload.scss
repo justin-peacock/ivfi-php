@@ -1,5 +1,7 @@
+@use "sass:list";
 @use "sass:map";
 @use "variables";
+@use "mixins";
 
 /* Full-window target, shown only while files are dragged over the page */
 html > body > div.uploadDrop {
@@ -172,6 +174,53 @@ html > body > button.newFolder {
   &:hover {
     color: map.get(variables.$root, "color-header-table");
     border-color: map.get(variables.$upload, "color-border-drop");
+  }
+
+  &:focus-visible {
+    outline: 1px solid map.get(variables.$upload, "color-bar");
+    outline-offset: 2px;
+  }
+}
+
+/**
+ * With a delete control in every row the last column needs room for it beside
+ * [Download], so it takes some from the filename column. The table is laid out
+ * at fixed widths, so nothing else would make that room
+ */
+$deletable-sizing: (
+  "desktop": (46%, 20%, 15%, 15.5%),
+  "mobile": (36%, 21%, 19%, 18%)
+);
+
+@each $view, $query in ("desktop": "isDesktop", "mobile": "isMobile") {
+  @include mixins.media-query("screen", $query) {
+    @for $i from 1 through 4 {
+      html > body > div.tableContainer > table.deletable > tbody > tr > td:nth-child(#{$i}),
+      html > body > div.tableContainer > table.deletable > thead > tr > th:nth-child(#{$i}) {
+        $width: list.nth(map.get($deletable-sizing, $view), $i);
+
+        width: $width;
+        max-width: $width;
+        min-width: $width;
+      }
+    }
+  }
+}
+
+/* A glyph rather than a bracketed word, which would not fit beside [Download] */
+html > body > div.tableContainer > table > tbody > tr > td > button.deleteItem {
+  margin-left: 10px;
+  padding: 0;
+  border: 0;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: none;
+  cursor: pointer;
+  color: map.get(variables.$root, "color-a-file");
+  background: none;
+
+  &:hover {
+    color: map.get(variables.$upload, "color-failed");
   }
 
   &:focus-visible {

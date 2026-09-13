@@ -152,7 +152,8 @@ directory being viewed. Disabled by default.
 | `max_size` | Bool/Int | `false` | Largest accepted file in bytes. `false` follows the php.ini limits. |
 | `overwrite` | Bool | `false` | Whether an upload may replace a file that is already there. |
 | `directories` | Bool | `true` | Whether folders may be created as well as files uploaded. |
-| `restrict` | Bool/String | `false` | Applies uploads and folder creation only to paths matching the expression, the way `authentication`'s own `restrict` does. |
+| `delete` | Bool | `false` | Whether files and empty folders may be deleted. Deleting is permanent. |
+| `restrict` | Bool/String | `false` | Applies uploads, folder creation and deletion only to paths matching the expression, the way `authentication`'s own `restrict` does. |
 
 ### Authentication is required
 
@@ -197,8 +198,8 @@ repaired.
 
 A signed-in client can also create a folder in the directory it is viewing,
 from the `+ New folder` button beside the path or the `[New] Folder` item in the
-menu. It follows the same gate as an upload
-and is switched off with `'directories' => false`, which leaves uploading on.
+menu. It follows the same gate as an upload and is switched off with
+`'directories' => false`, which leaves uploading on.
 
 The name goes through the same handling as an uploaded file's: reduced to one
 path segment, stripped of control characters and of leading whitespace and
@@ -212,6 +213,24 @@ go. A directory is not executed, but one with that name *is* handed to the
 interpreter by a typical handler mapping, which answers a request to browse it
 with a 404 rather than a listing. Refusing it at the point of creation is the
 only moment it can still be given a different name.
+
+### Deleting
+
+With `'delete' => true`, each file and folder in the listing gets a delete
+button. It asks for confirmation, then deletes permanently: there is no trash.
+It follows the same gate as an upload.
+
+The rules keep one mistaken click to one item:
+
+- A folder is only deleted when it is empty. Hidden files count, so a folder
+  that looks empty but holds a `.ivfi` file is refused.
+- The name has to be exactly an entry the listing shows. Dotfiles, anything a
+  `filter` or `.ivfi` file hides, and the indexer's own script are out of reach,
+  and a name that describes a path matches nothing.
+- A file whose name carries an extension from the server-side blocklist above
+  is refused, in any segment. Where the index is served from the web root, that
+  keeps `indexer.config.php` and any other PHP beside it from being deleted.
+- A symbolic link is removed as a link. What it points at is left alone.
 
 ### Size limits
 

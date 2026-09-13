@@ -99,8 +99,90 @@ class componentUpload
 			this.createDirectoryButton();
 		}
 
+		if(this.settings.delete)
+		{
+			this.createDeleteButtons();
+		}
+
 		return this;
 	}
+
+	/**
+	 * Adds a delete control to every file and folder row.
+	 *
+	 * Added to the rows the page arrived with, which sorting and filtering move
+	 * and hide but never rebuild, so each control stays with its row. One
+	 * listener on the table answers all of them
+	 */
+	private createDeleteButtons = (): void =>
+	{
+		const table = document.body.querySelector(':scope > div.tableContainer > table');
+
+		if(!table)
+		{
+			return;
+		}
+
+		/* Widens the last column, which otherwise has no room beside [Download] */
+		table.classList.add('deletable');
+
+		table.querySelectorAll(':scope > tbody > tr.file, :scope > tbody > tr.directory').forEach((row: Element) =>
+		{
+			const name = row.children[0] ? row.children[0].getAttribute('data-raw') : null;
+			const cell = row.lastElementChild;
+
+			if(name === null || !cell)
+			{
+				return;
+			}
+
+			cell.append(DOM.new('button', {
+				class : 'deleteItem',
+				type : 'button',
+				text : '\u2715',
+				title : `Delete ${name}`,
+				'aria-label' : `Delete ${name}`
+			}));
+		});
+
+		eventHooks.listen(table as HTMLElement, 'click', 'uploadDeleteItem', (event: MouseEvent) =>
+		{
+			const button = (event.target as HTMLElement).closest('button.deleteItem');
+
+			if(!button)
+			{
+				return;
+			}
+
+			event.preventDefault();
+
+			const row = button.closest('tr');
+
+			this.deleteItem(
+				row.children[0].getAttribute('data-raw'),
+				row.classList.contains('directory')
+			);
+		});
+	};
+
+	/**
+	 * Asks, then deletes one file or empty folder in the listing being viewed
+	 */
+	private deleteItem = (name: string, directory: boolean): void =>
+	{
+		const question = directory
+			? `Delete the folder "${name}"? Only an empty folder can be deleted. This cannot be undone.`
+			: `Delete "${name}"? This cannot be undone.`;
+
+		if(!window.confirm(question))
+		{
+			return;
+		}
+
+		this.post(this.settings.deleteAction, name, directory
+			? 'The folder could not be deleted.'
+			: 'The file could not be deleted.');
+	};
 
 	/**
 	 * Puts folder creation beside the path, where it can be seen.
@@ -519,10 +601,22 @@ class componentUpload
 			return;
 		}
 
+		this.post(this.settings.directoryAction, name, 'The folder could not be created.');
+	};
+
+	/**
+	 * Sends a named action to the directory being viewed, reloading the listing
+	 * when it lands and saying why when it does not.
+	 *
+	 * Folder creation and deletion are the same request apart from the action,
+	 * so they share it rather than keeping two copies in step with the server
+	 */
+	private post = (action: string, name: string, failure: string): void =>
+	{
 		const fields = this.settings.fields || {};
 		const body = new URLSearchParams();
 
-		body.append(fields.action, this.settings.directoryAction);
+		body.append(fields.action, action);
 		body.append(fields.token, this.settings.token);
 		body.append(fields.name, name);
 
@@ -539,15 +633,13 @@ class componentUpload
 		{
 			if(ok && payload && payload.ok)
 			{
-				/* The listing does not have it yet, so it is fetched again */
+				/* The listing is out of date, so it is fetched again */
 				window.location.reload();
 
 				return;
 			}
 
-			window.alert(
-				payload && payload.error ? payload.error : 'The folder could not be created.'
-			);
+			window.alert(payload && payload.error ? payload.error : failure);
 		}).catch((error) =>
 		{
 			log('upload', error);
@@ -556,7 +648,7 @@ class componentUpload
 			 * Anything but the JSON this endpoint answers with means the request
 			 * never reached it, a session that expired being the likeliest
 			 */
-			window.alert('The folder could not be created. Reload the page and try again.');
+			window.alert(`${failure} Reload the page and try again.`);
 		});
 	};
 

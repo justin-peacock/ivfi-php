@@ -175,6 +175,24 @@ final class UploadTest extends IndexerTestCase
         return [$response, json_decode($response->body, true) ?? []];
     }
 
+    /**
+     * @return array{0: Response, 1: array<string, mixed>}
+     */
+    private function delete(
+        Server $server,
+        string $token,
+        string $name,
+        string $uri = '/'
+    ): array {
+        $response = $server->request($uri, [], [
+            'ivfi_action' => 'delete',
+            'ivfi_csrf'   => $token,
+            'ivfi_name'   => $name,
+        ]);
+
+        return [$response, json_decode($response->body, true) ?? []];
+    }
+
     public function testAnAuthenticatedClientIsOfferedTheEndpoint(): void
     {
         $server = $this->serve();
@@ -1072,6 +1090,234 @@ final class UploadTest extends IndexerTestCase
         [, $uploaded] = $this->upload($server, $token, 'holiday.jpg', 'jpeg-bytes');
 
         $this->assertTrue($uploaded['ok'] ?? false);
+    }
+
+    public function testAFileIsDeleted(): void
+    {
+        $server = $this->serve(['delete' => true]);
+        $token = $this->signIn($server);
+
+        [$response, $payload] = $this->delete($server, $token, 'existing.jpg');
+
+        $this->assertSame('200 OK', $response->header('Status'));
+        $this->assertTrue($payload['ok'] ?? false);
+        $this->assertSame(['name' => 'existing.jpg', 'type' => 'file'], $payload['deleted'] ?? null);
+        $this->assertFileDoesNotExist($this->root() . '/existing.jpg');
+    }
+
+    public function testAFileIsDeletedFromThePathItWasAskedFor(): void
+    {
+        $server = $this->serve(['delete' => true]);
+        file_put_contents($this->root() . '/incoming/existing.jpg', 'nested');
+        $token = $this->signIn($server);
+
+        [, $payload] = $this->delete($server, $token, 'existing.jpg', '/incoming/');
+
+        $this->assertTrue($payload['ok'] ?? false);
+        $this->assertFileDoesNotExist($this->root() . '/incoming/existing.jpg');
+        $this->assertSame('original', file_get_contents($this->root() . '/existing.jpg'));
+    }
+
+    public function testAnEmptyDirectoryIsDeleted(): void
+    {
+        $server = $this->serve(['delete' => true]);
+        $token = $this->signIn($server);
+
+        [, $payload] = $this->delete($server, $token, 'incoming');
+
+        $this->assertTrue($payload['ok'] ?? false);
+        $this->assertSame('directory', $payload['deleted']['type'] ?? null);
+        $this->assertDirectoryDoesNotExist($this->root() . '/incoming');
+    }
+
+    /**
+     * Only an empty directory goes, so one mistaken click removes one thing at
+     * most and never a tree. A dotfile the listing does not show still counts.
+     */
+    #[DataProvider('occupiedDirectoryContents')]
+    public function testADirectoryWithSomethingInItIsNotDeleted(string $inside): void
+    {
+        $server = $this->serve(['delete' => true]);
+        file_put_contents($this->root() . '/incoming/' . $inside, 'kept');
+        $token = $this->signIn($server);
+
+        [$response, $payload] = $this->delete($server, $token, 'incoming');
+
+        $this->assertSame('409 Conflict', $response->header('Status'));
+        $this->assertFalse($payload['ok'] ?? false);
+        $this->assertFileExists($this->root() . '/incoming/' . $inside);
+    }
+
+    /**
+     * @return array<string, array{0: string}>
+     */
+    public static function occupiedDirectoryContents(): array
+    {
+        return [
+            'a file'   => ['holiday.jpg'],
+            'a dotfile' => ['.hidden'],
+        ];
+    }
+
+    /**
+     * The name is matched against what the listing shows, so anything it hides
+     * is out of reach, and so is a name that describes a path rather than an
+     * entry of the directory being viewed.
+     */
+    #[DataProvider('unlistedNames')]
+    public function testANameTheListingDoesNotShowIsNotDeleted(string $name, string $uri): void
+    {
+        $server = $this->serve(['delete' => true], [
+            'filter' => ['file' => '/^(?!secret)/', 'directory' => false],
+        ]);
+        file_put_contents($this->root() . '/.hidden.jpg', 'kept');
+        file_put_contents($this->root() . '/secret.jpg', 'kept');
+        $token = $this->signIn($server, $uri);
+
+        [$response, $payload] = $this->delete($server, $token, $name, $uri);
+
+        $this->assertSame('404 Not Found', $response->header('Status'));
+        $this->assertFalse($payload['ok'] ?? false);
+        $this->assertFileExists($this->root() . '/.hidden.jpg');
+        $this->assertFileExists($this->root() . '/secret.jpg');
+        $this->assertSame('original', file_get_contents($this->root() . '/existing.jpg'));
+        $this->assertDirectoryExists($this->root() . '/incoming');
+    }
+
+    /**
+     * @return array<string, array{0: string, 1: string}>
+     */
+    public static function unlistedNames(): array
+    {
+        return [
+            'dotfile'          => ['.hidden.jpg', '/'],
+            'filtered out'     => ['secret.jpg', '/'],
+            'climbing out'     => ['../existing.jpg', '/incoming/'],
+            'a nested path'    => ['incoming/../existing.jpg', '/'],
+            'current dir'      => ['.', '/incoming/'],
+            'parent dir'       => ['..', '/incoming/'],
+            'trailing dot'     => ['existing.jpg.', '/'],
+            'absolute path'    => ['/etc/hostname', '/'],
+            'empty'            => ['', '/'],
+            'indexer script'   => ['indexer.php', '/'],
+        ];
+    }
+
+    /**
+     * Where the index is served from the web root, the indexer's configuration
+     * sits in the listing beside everything else. It is not something a
+     * signed-in client should be able to take down.
+     */
+    #[DataProvider('runnableNames')]
+    public function testAFileTheServerCanRunIsNotDeleted(string $name): void
+    {
+        $server = $this->serve(['delete' => true]);
+
+        if (!is_file($this->root() . '/' . $name)) {
+            file_put_contents($this->root() . '/' . $name, '<?php');
+        }
+
+        $token = $this->signIn($server);
+
+        [$response, $payload] = $this->delete($server, $token, $name);
+
+        $this->assertSame('403 Forbidden', $response->header('Status'));
+        $this->assertFalse($payload['ok'] ?? false);
+        $this->assertFileExists($this->root() . '/' . $name);
+    }
+
+    /**
+     * @return array<string, array{0: string}>
+     */
+    public static function runnableNames(): array
+    {
+        return [
+            'indexer config' => ['indexer.config.php'],
+            'uppercase'      => ['notes.PHP'],
+            'middle'         => ['payload.php.jpg'],
+        ];
+    }
+
+    /**
+     * A link is removed as a link. What it points at stays, even when that is a
+     * directory with things in it.
+     */
+    public function testALinkIsRemovedWithoutTouchingItsTarget(): void
+    {
+        $server = $this->serve(['delete' => true]);
+        file_put_contents($this->root() . '/incoming/holiday.jpg', 'kept');
+
+        if (!@symlink($this->root() . '/incoming', $this->root() . '/shortcut')) {
+            $this->markTestSkipped('symlinks are not available here');
+        }
+
+        $token = $this->signIn($server);
+
+        [, $payload] = $this->delete($server, $token, 'shortcut');
+
+        $this->assertTrue($payload['ok'] ?? false);
+        $this->assertFalse(is_link($this->root() . '/shortcut'));
+        $this->assertFileExists($this->root() . '/incoming/holiday.jpg');
+    }
+
+    public function testDeletingNeedsTheToken(): void
+    {
+        $server = $this->serve(['delete' => true]);
+        $this->signIn($server);
+
+        [$response, $payload] = $this->delete($server, 'not-the-token', 'existing.jpg');
+
+        $this->assertSame('403 Forbidden', $response->header('Status'));
+        $this->assertFalse($payload['ok'] ?? false);
+        $this->assertFileExists($this->root() . '/existing.jpg');
+    }
+
+    public function testAnUnauthenticatedClientCannotDelete(): void
+    {
+        /* Authentication covers only `/incoming/`, leaving the root open */
+        $server = $this->serve(['delete' => true], [
+            'authentication' => ['restrict' => '#^/incoming/#'],
+        ]);
+
+        [$response, $payload] = $this->delete($server, 'anything', 'existing.jpg');
+
+        $this->assertSame('403 Forbidden', $response->header('Status'));
+        $this->assertFalse($payload['ok'] ?? false);
+        $this->assertFileExists($this->root() . '/existing.jpg');
+    }
+
+    /**
+     * Deleting is the one write that cannot be undone, so it stays off until
+     * it is asked for, and the page is not told about an endpoint it cannot use.
+     */
+    public function testDeletingIsOffUnlessTurnedOn(): void
+    {
+        $server = $this->serve();
+        $token = $this->signIn($server);
+
+        $config = $this->jsConfig($server->request('/'));
+
+        $this->assertFalse(
+            $config['upload']['delete'] ?? true,
+            'the page offered deleting that is switched off'
+        );
+
+        [$response, $payload] = $this->delete($server, $token, 'existing.jpg');
+
+        $this->assertSame('403 Forbidden', $response->header('Status'));
+        $this->assertFalse($payload['ok'] ?? false);
+        $this->assertFileExists($this->root() . '/existing.jpg');
+    }
+
+    public function testThePageIsToldWhenDeletingIsOn(): void
+    {
+        $server = $this->serve(['delete' => true]);
+        $this->signIn($server);
+
+        $config = $this->jsConfig($server->request('/'));
+
+        $this->assertTrue($config['upload']['delete'] ?? false);
+        $this->assertSame('delete', $config['upload']['deleteAction'] ?? null);
     }
 
     public function testAnUploadedFileIsReadableByTheServer(): void

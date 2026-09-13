@@ -52,6 +52,7 @@ $config = [
      *     'max_size' => 104857600,               // bytes, false follows php.ini
      *     'overwrite' => false,
      *     'directories' => true,                 // allow creating folders too
+     *     'delete' => false,                     // allow deleting files and empty folders
      *     'restrict' => '/^\/(incoming)\/?/i'   // optional, only these paths
      *   ]
      */
@@ -77,6 +78,13 @@ $config = [
        * so it is offered to the same clients on the same paths
        */
       'directories' => true,
+      /**
+       * Whether files and empty folders may be deleted.
+       *
+       * Off unless asked for, because it is the one write that cannot be
+       * undone. Same gate as an upload otherwise
+       */
+      'delete' => false,
       /* Optional pattern, so only some of the authenticated paths accept uploads */
       'restrict' => false
     ],
@@ -655,6 +663,7 @@ define('UPLOAD_FIELD_NAME', 'ivfi_name');
 /** Values of `UPLOAD_FIELD_ACTION` that mark what a request is asking for */
 define('UPLOAD_ACTION', 'upload');
 define('UPLOAD_ACTION_DIRECTORY', 'directory');
+define('UPLOAD_ACTION_DELETE', 'delete');
 /**
  * Room left for the rest of a multipart body when deriving a size limit from
  * `post_max_size`: the boundaries, the part headers and the other fields
@@ -1914,6 +1923,191 @@ function handleDirectory($indexer, $config, $available)
 }
 
 /**
+ * Whether files and empty directories may be deleted
+ *
+ * @param Array    $config     Configuration values
+ * @param Boolean  $available  Whether this request may write here at all
+ *
+ * @return Boolean
+ */
+function uploadDeleteIsAvailable($config, $available)
+{
+  return $available && !empty($config['upload']['delete']);
+}
+
+/**
+ * Handles a request to delete a file or an empty directory, and returns otherwise
+ *
+ * @param Indexer  $indexer    Indexer class
+ * @param Array    $config     Configuration values
+ * @param Boolean  $available  Whether this request may write here
+ *
+ * @return void
+ */
+function handleDelete($indexer, $config, $available)
+{
+  if(!uploadIsEnabled($config)
+    || (isset($_SERVER['REQUEST_METHOD']) ? $_SERVER['REQUEST_METHOD'] : 'GET') !== 'POST'
+    || !isset($_POST[UPLOAD_FIELD_ACTION])
+    || $_POST[UPLOAD_FIELD_ACTION] !== UPLOAD_ACTION_DELETE)
+  {
+    return;
+  }
+
+  if(!uploadDeleteIsAvailable($config, $available))
+  {
+    uploadRespond(403, [
+      'ok' => false,
+      'error' => 'Nothing can be deleted here.'
+    ]);
+  }
+
+  $token = isset($_POST[AUTH_FIELD_CSRF]) ? (string) $_POST[AUTH_FIELD_CSRF] : '';
+
+  if(empty($_SESSION['csrf']) || !hash_equals($_SESSION['csrf'], $token))
+  {
+    uploadRespond(403, [
+      'ok' => false,
+      'error' => 'Your session expired. Reload the page and try again.'
+    ]);
+  }
+
+  /**
+   * Taken exactly as sent, not through `uploadSafeName()`. Sanitising a name
+   * that is about to be deleted changes which entry it names: `holiday.jpg.`
+   * would delete `holiday.jpg`
+   */
+  $name = isset($_POST[UPLOAD_FIELD_NAME]) && is_string($_POST[UPLOAD_FIELD_NAME])
+    ? $_POST[UPLOAD_FIELD_NAME]
+    : '';
+
+  $directory = $indexer->path;
+
+  /* The same containment the other writes check, for the same reason */
+  if(!is_dir($directory)
+    || !Helpers::isAboveCurrent($directory, BASE_PATH))
+  {
+    uploadRespond(403, [
+      'ok' => false,
+      'error' => 'That directory cannot be written to.'
+    ]);
+  }
+
+  /**
+   * Only what the listing shows. Hidden entries stay out of reach, and so does
+   * any name that is not exactly an entry here, a path among them
+   */
+  $type = $name === '' ? NULL : $indexer->listedType($name);
+
+  if($type === NULL)
+  {
+    uploadRespond(404, [
+      'ok' => false,
+      'error' => 'That is not here any more. Reload the page.'
+    ]);
+  }
+
+  $directory = rtrim($directory, DIRECTORY_SEPARATOR);
+  $target = $directory . DIRECTORY_SEPARATOR . $name;
+
+  /* An entry of this directory resolves inside it; anything else is a bug here */
+  if(dirname($target) !== $directory)
+  {
+    uploadRespond(400, [
+      'ok' => false,
+      'error' => 'That name cannot be deleted.'
+    ]);
+  }
+
+  /**
+   * Nothing the server would run. In an install where the index is served from
+   * the web root, that is the indexer's own configuration and anything else PHP
+   * sitting beside it, which is not something a listing should be able to take
+   * down. Every segment, the way uploads check them
+   */
+  if($type === 'file')
+  {
+    $segments = explode('.', strtolower($name));
+
+    array_shift($segments);
+
+    foreach($segments as $segment)
+    {
+      if(in_array($segment, UPLOAD_BLOCKED_EXTENSIONS, true))
+      {
+        uploadRespond(403, [
+          'ok' => false,
+          'error' => 'Files the server can run cannot be deleted from here.'
+        ]);
+      }
+    }
+  }
+
+  if(!is_writable($directory))
+  {
+    error_log(sprintf('IVFi: cannot delete from %s, which is not writable', $directory));
+
+    uploadRespond(500, [
+      'ok' => false,
+      'error' => 'The server cannot write to this directory.'
+    ]);
+  }
+
+  /**
+   * A link is removed as a link, never followed: `rmdir()` refuses one that
+   * points at a directory, and `unlink()` on it leaves the target alone
+   */
+  if($type === 'directory' && !is_link($target))
+  {
+    /**
+     * `rmdir()` only removes an empty directory, which is the whole rule. No
+     * recursion and no separate emptiness check to race against: a file that
+     * lands in between makes it fail rather than go with the directory
+     */
+    if(!@rmdir($target))
+    {
+      $entries = @scandir($target);
+
+      if(is_array($entries) && count($entries) > 2)
+      {
+        uploadRespond(409, [
+          'ok' => false,
+          'error' => 'Only an empty folder can be deleted, and this one has something in it (hidden files count).'
+        ]);
+      }
+
+      error_log(sprintf('IVFi: could not delete a directory in %s', $directory));
+
+      uploadRespond(500, [
+        'ok' => false,
+        'error' => 'The folder could not be deleted.'
+      ]);
+    }
+  } else if(!@unlink($target))
+  {
+    if(!file_exists($target) && !is_link($target))
+    {
+      uploadRespond(404, [
+        'ok' => false,
+        'error' => 'That is not here any more. Reload the page.'
+      ]);
+    }
+
+    error_log(sprintf('IVFi: could not delete a file in %s', $directory));
+
+    uploadRespond(500, [
+      'ok' => false,
+      'error' => 'The file could not be deleted.'
+    ]);
+  }
+
+  uploadRespond(200, [
+    'ok' => true,
+    'deleted' => ['name' => $name, 'type' => $type]
+  ]);
+}
+
+/**
  * Whether uploads are switched on at all, regardless of who is asking
  *
  * @param Array  $config  Configuration values
@@ -3157,6 +3351,37 @@ class Indexer extends Helpers
   }
 
   /**
+   * What a name in the current directory is, as far as the listing is concerned
+   *
+   * Runs the scan and filters the listing itself uses, so a caller acting on a
+   * name can only reach what a client was shown: not a dotfile, not something
+   * a filter or `.ivfi` hides, and not the indexer's own files at the base.
+   * The name has to match a directory entry exactly, which also means it
+   * cannot describe a path
+   *
+   * @param String  $name  An entry name, as the client sent it
+   *
+   * @return String  `file` or `directory`, NULL when the listing does not show it
+   */
+  public function listedType($name)
+  {
+    $listed = $this->handleFiles(self::getFiles(), self::getCurrentDirectory() === '/');
+
+    foreach(['directories' => 'directory', 'files' => 'file'] as $key => $type)
+    {
+      foreach($listed[$key] as $item)
+      {
+        if($item[1] === $name)
+        {
+          return $type;
+        }
+      }
+    }
+
+    return NULL;
+  }
+
+  /**
    * Gets the currently requested directory
    */
   public function getCurrentDirectory()
@@ -3870,6 +4095,7 @@ $uploadAvailable = uploadIsAvailable($config, $authenticated);
  */
 handleUpload($indexer, $config, $uploadAvailable);
 handleDirectory($indexer, $config, $uploadAvailable);
+handleDelete($indexer, $config, $uploadAvailable);
 
 /**
  * The page carries the form token so that an upload can prove it came from
@@ -4314,6 +4540,8 @@ function constructJsConfig($config, $sorting, $timestamp, $bust, $theme, $upload
       'action' => UPLOAD_ACTION,
       'directories' => uploadDirectoriesAreAvailable($config, true),
       'directoryAction' => UPLOAD_ACTION_DIRECTORY,
+      'delete' => uploadDeleteIsAvailable($config, true),
+      'deleteAction' => UPLOAD_ACTION_DELETE,
       'fields' => [
         'action' => UPLOAD_FIELD_ACTION,
         'file' => UPLOAD_FIELD_FILE,
