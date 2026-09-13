@@ -94,8 +94,42 @@ class componentUpload
 
 		this.bind();
 
+		if(this.settings.directories)
+		{
+			this.createDirectoryButton();
+		}
+
 		return this;
 	}
+
+	/**
+	 * Puts folder creation beside the path, where it can be seen.
+	 *
+	 * The menu item alone left it behind the gear, which nothing points at. It
+	 * goes in before the path rather than inside it: floated there, the path
+	 * (which hides its overflow) narrows to sit beside it and still ends a long
+	 * path in an ellipsis, where a float inside it would have the path run
+	 * underneath the button instead
+	 */
+	private createDirectoryButton = (): void =>
+	{
+		const path = document.body.querySelector(':scope > div.path');
+
+		if(!path)
+		{
+			return;
+		}
+
+		const button = DOM.new('button', {
+			class : 'newFolder',
+			type : 'button',
+			text : '+ New folder'
+		});
+
+		path.before(button);
+
+		eventHooks.listen(button, 'click', 'uploadNewFolder', () => this.createDirectory());
+	};
 
 	/**
 	 * Marks this instance as the one drops belong to.

@@ -148,6 +148,38 @@ html > body > div.uploadPanel {
   }
 }
 
+/**
+ * Floated ahead of the path, which hides its overflow and so narrows to sit
+ * beside it. Kept shorter than the path row, or the listing below would narrow
+ * around whatever of it hung past the row
+ */
+html > body > button.newFolder {
+  float: right;
+  margin: 19px 10px 0 12px;
+  padding: 4px 10px;
+  border: 1px solid map.get(variables.$upload, "color-border-panel");
+  border-radius: 3px;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.2;
+  letter-spacing: 1px;
+  white-space: nowrap;
+  cursor: pointer;
+  color: map.get(variables.$root, "color-a-file");
+  background-color: map.get(variables.$upload, "color-background-panel");
+  transition: color 0.2s, border-color 0.2s;
+
+  &:hover {
+    color: map.get(variables.$root, "color-header-table");
+    border-color: map.get(variables.$upload, "color-border-drop");
+  }
+
+  &:focus-visible {
+    outline: 1px solid map.get(variables.$upload, "color-bar");
+    outline-offset: 2px;
+  }
+}
+
 /* Carries outcomes to screen readers; there is nothing here to see */
 html > body > div.uploadPanel > div.uploadAnnouncer {
   position: absolute;
