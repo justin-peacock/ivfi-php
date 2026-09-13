@@ -1,0 +1,22 @@
+/**
+ * The one stylesheet entry.
+ *
+ * Tailwind v4 with the shadcn "nova" look (preset bciy3lNA: zinc base, lime
+ * primary, Geist). The page keeps its semantic class names, which the scripts,
+ * the tests and user themes all select on, so it is styled with `@apply` in
+ * these files rather than with utility classes in the markup.
+ *
+ * No source files are scanned for class names. Scanning the template and the
+ * scripts only turned ordinary words into stray utilities (`contents`, which
+ * the README container also uses, among them), and nothing relies on a
+ * utility class in markup. Add an `@source` if that ever changes.
+ */
+
+@import "tailwindcss" source(none);
+@import "./theme.css";
+@import "./fonts.css";
+@import "./base.css";
+@import "./listing.css";
+@import "./settings.css";
+@import "./gallery.css";
+@import "./upload.css";

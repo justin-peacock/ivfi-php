@@ -10,9 +10,7 @@ import { eventHooks } from '../../modules/event-hooks';
 /** Classes */
 import optimizeClass from './../optimize';
 /** Helpers */
-import { DOM, debounce, shortenString } from '../../helpers';
-/** Stylesheet */
-import '../../../css/gallery.scss';
+import { DOM, debounce, shortenString, iconElement } from '../../helpers';
 
 /** Constants */
 import { Keys, CookieKey } from '../../constant';
@@ -1646,7 +1644,11 @@ export default class galleryClass
 			);
 		}
 
-		element.innerHTML = `List<span class="inheritParentAction">${visible ? '+': '-'}</span>`;
+		/* Pressed while the list is showing, which it no longer is when it was visible */
+		if(element)
+		{
+			element.setAttribute('aria-pressed', visible ? 'false' : 'true');
+		}
 
 		DOM.style.set(list, {
 			'display': visible ? 'none': 'table-cell'
@@ -1959,47 +1961,52 @@ export default class galleryClass
 	/* Construct gallery top bar items */
 	private barConstruct = (bar: HTMLElement): HTMLElement =>
 	{
+		/**
+		 * Each control leads with an icon. Icons ignore the pointer, so a click
+		 * still lands on the element carrying `data-action`, which is what the
+		 * click handler looks for
+		 */
+		const control = (element: HTMLElement, icon: Parameters<typeof iconElement>[0]): HTMLElement =>
+		{
+			element.prepend(iconElement(icon));
+
+			return element;
+		};
+
 		/* Create `download` button */
-		bar.append(DOM.new('a', {
+		bar.append(control(DOM.new('a', {
 			'text': this.options.mobile ? 'Save': 'Download',
 			'class': 'download',
 			'download': ''
-		}));
+		}), 'download'));
 
 		if(!this.options.mobile)
 		{
 			/* Create `previous` button */
-			bar.append(DOM.new('span', {
+			bar.append(control(DOM.new('span', {
 				'data-action': 'previous',
 				'text': 'Previous'
-			}));
+			}), 'chevron-left'));
 
 			/* Create `next` button */
-			bar.append(DOM.new('span', {
+			bar.append(control(DOM.new('span', {
 				'data-action': 'next',
 				'text': 'Next'
-			}));
+			}), 'chevron-right'));
 
-			/* Create `list toggle` button */
-			const listToggle: HTMLElement = DOM.new('span', {
+			/* Create `list toggle` button, pressed while the list shows */
+			bar.append(control(DOM.new('span', {
 				'data-action': 'toggle',
+				'aria-pressed': this.options.list.show ? 'true': 'false',
 				'text': 'List'
-			});
-
-			listToggle.append(DOM.new('span', {
-				'class': 'inheritParentAction',
-				'text': this.options.list.show ? '-': '+'
-			}));
-
-			/* Create `list toggle` button */
-			bar.append(listToggle);
+			}), 'panel-right'));
 		}
 
 		/* Create `close` button */
-		bar.append(DOM.new('span', {
+		bar.append(control(DOM.new('span', {
 			'data-action': 'close',
 			'text': 'Close'
-		}));
+		}), 'x'));
 
 		return bar;
 	};

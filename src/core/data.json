@@ -22,19 +22,19 @@
 	},
 	"menuLabels" : {
 		"filter" : {
-			"text" : "[Show] Filter"
+			"text" : "Filter"
 		},
 		"wget" : {
-			"text" : "[Copy] WGET"
+			"text" : "Copy wget command"
 		},
 		"gallery" : {
-			"text" : "[Open] Gallery"
+			"text" : "Open gallery"
 		},
 		"settings" : {
-			"text" : "[Open] Settings"
+			"text" : "Settings"
 		},
 		"directory" : {
-			"text" : "[New] Folder"
+			"text" : "New folder"
 		}
 	},
 	"reverseSearch" : {

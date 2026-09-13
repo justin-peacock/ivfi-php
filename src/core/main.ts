@@ -40,9 +40,7 @@ import {
 } from './types';
 
 /** Stylesheets */
-import '../css/root.scss';
-import '../css/fonts.scss';
-import '../css/main.scss';
+import '../css/index.css';
 
 /* References */
 const selector = data.instances.selector;

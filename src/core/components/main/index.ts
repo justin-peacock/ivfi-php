@@ -10,14 +10,16 @@ import {
 	DOM,
 	generateWget,
 	clipboardCopy,
-	comparer
+	comparer,
+	iconElement
 } from '../../helpers';
 
 /** Types */
 import {
 	MComponentMain,
 	TUserClient,
-	TOptimizeRowItem
+	TOptimizeRowItem,
+	TIconName
 } from '../../types';
 
 /* References */
@@ -43,6 +45,7 @@ main.menu.create = () =>
 	const items: Array<{
 		text: string;
 		id: string;
+		icon: TIconName;
 		class?: string;
 	}> = [];
 
@@ -50,12 +53,14 @@ main.menu.create = () =>
 
 	items.push({
 		text: data.text.menuLabels.filter.text,
-		id: 'filter'
+		id: 'filter',
+		icon: 'search'
 	});
 
 	items.push({
 		text: data.text.menuLabels.wget.text,
-		id: 'copy'
+		id: 'copy',
+		icon: 'copy'
 	});
 
 	/* Add menu item if gallery is enabled */
@@ -66,7 +71,8 @@ main.menu.create = () =>
 	{
 		items.unshift({
 			text: data.text.menuLabels.gallery.text,
-			id: 'gallery'
+			id: 'gallery',
+			icon: 'images'
 		});
 	}
 
@@ -76,6 +82,7 @@ main.menu.create = () =>
 		items.unshift({
 			text: data.text.menuLabels.settings.text,
 			id: 'settings',
+			icon: 'sliders-horizontal',
 			class: 'settings'
 		});
 	}
@@ -89,7 +96,8 @@ main.menu.create = () =>
 	{
 		items.push({
 			text: data.text.menuLabels.directory.text,
-			id: 'directory'
+			id: 'directory',
+			icon: 'folder-plus'
 		});
 	}
 
@@ -104,6 +112,9 @@ main.menu.create = () =>
 		{
 			element.setAttribute('id', item.id);
 		}
+
+		/* Ignores the pointer, so a click still lands on the item's `div` */
+		element.prepend(iconElement(item.icon));
 
 		container.append(element);
 	});
