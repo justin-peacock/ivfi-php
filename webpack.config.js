@@ -166,8 +166,17 @@ const config = (env, argv) => {
 				minify: false,
 				template: __dirname + '/src/php/template.php',
 				filename: __dirname + '/build/indexer.php',
-				templateParameters: () => {
-					return templateParameters;
+				/**
+				 * `buildId` follows the compiled scripts and styles, so every build
+				 * that changes them changes the cache-busting query string too. The
+				 * version alone stayed the same across deploys, and a CDN kept
+				 * serving the previous build's assets for as long as it cached them
+				 */
+				templateParameters: (compilation) => {
+					return {
+						...templateParameters,
+						buildId: compilation.hash.slice(0, 16)
+					};
 				}
 			}),
 			new MiniCssExtractPlugin({
