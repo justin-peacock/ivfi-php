@@ -152,7 +152,7 @@ directory being viewed. Disabled by default.
 | `max_size` | Bool/Int | `false` | Largest accepted file in bytes. `false` follows the php.ini limits. |
 | `overwrite` | Bool | `false` | Whether an upload may replace a file that is already there. |
 | `directories` | Bool | `true` | Whether folders may be created as well as files uploaded. |
-| `restrict` | Bool/String | `false` | Applies uploads only to paths matching the expression, the way `authentication`'s own `restrict` does. |
+| `restrict` | Bool/String | `false` | Applies uploads and folder creation only to paths matching the expression, the way `authentication`'s own `restrict` does. |
 
 ### Authentication is required
 
@@ -205,8 +205,9 @@ dots, and refused when it is not valid UTF-8 or is too long for the
 filesystem.
 
 Dots are otherwise fine (`v1.2.3 release` works), with one exception. A name
-ending in an extension from the blocklists above is refused, because a
-directory called `reports.php` is not executed but *is* handed to the
+carrying an extension from the blocklists above is refused, in any dotted
+segment and not only the last, so `reports.php` and `reports.php.stuff` both
+go. A directory is not executed, but one with that name *is* handed to the
 interpreter by a typical handler mapping, which answers a request to browse it
 with a 404 rather than a listing. Refusing it at the point of creation is the
 only moment it can still be given a different name.

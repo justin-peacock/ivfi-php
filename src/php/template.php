@@ -1778,11 +1778,15 @@ function uploadDirectoryRejection($name)
      * A directory is not executed, but one named `reports.php` is still routed
      * to the interpreter by a typical handler mapping, which answers a request
      * to browse it with a 404 rather than a listing. Refused at the point it is
-     * created, where it can still be given a different name
+     * created, where it can still be given a different name.
+     *
+     * Every segment is checked, not only the last, for the same reason the
+     * upload path checks them: a handler mapping can match any of them, so
+     * `reports.php.stuff` is routed the same way `reports.php` is
      */
     if(uploadIsRefusedExtension($segment))
     {
-      return 'That name ends in an extension the server treats specially.';
+      return 'That name carries an extension the server treats specially.';
     }
   }
 

@@ -639,7 +639,13 @@ final class UploadTest extends IndexerTestCase
         $this->assertFalse($config['upload']['enabled'] ?? false);
     }
 
-    public function testRestrictKeepsUploadsOutOfPathsItDoesNotCover(): void
+    /**
+     * Creating a directory reads the same `$available` the upload path does,
+     * so `restrict` governs both. Asserted for both here rather than inferred
+     * from the shared value, which is the thing that could quietly stop being
+     * shared.
+     */
+    public function testRestrictKeepsWritesOutOfPathsItDoesNotCover(): void
     {
         $server = $this->serve(['restrict' => '#^/incoming/#']);
         $server->request('/');
@@ -665,14 +671,29 @@ final class UploadTest extends IndexerTestCase
             'the covered path did not offer uploads'
         );
 
-        [, $payload] = $this->upload(
-            $server, (string) $covered['upload']['token'], 'holiday.jpg'
-        );
+        $token = (string) $covered['upload']['token'];
+
+        [, $uploaded] = $this->upload($server, $token, 'holiday.jpg');
 
         $this->assertFalse(
-            $payload['ok'] ?? false,
+            $uploaded['ok'] ?? false,
             'the root accepted an upload despite the restriction'
         );
+
+        [$response, $created] = $this->createDirectory($server, $token, 'nope');
+
+        $this->assertSame('403 Forbidden', $response->header('Status'));
+        $this->assertFalse(
+            $created['ok'] ?? false,
+            'the root created a directory despite the restriction'
+        );
+        $this->assertDirectoryDoesNotExist($this->root() . '/nope');
+
+        /* And the covered path still accepts one, or this proves only that it is broken */
+        [, $allowed] = $this->createDirectory($server, $token, 'allowed', '/incoming/');
+
+        $this->assertTrue($allowed['ok'] ?? false);
+        $this->assertDirectoryExists($this->root() . '/incoming/allowed');
     }
 
     public function testAnExistingFileIsNotReplacedByDefault(): void

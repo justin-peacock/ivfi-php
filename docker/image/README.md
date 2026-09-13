@@ -16,12 +16,12 @@ already.
 | `IVFI_USERNAME` | | Sign-in name. With a password, enables authentication and uploads. |
 | `IVFI_PASSWORD` | | Plaintext password, hashed at container start. |
 | `IVFI_PASSWORD_HASH` | | A `password_hash()` value, used instead of `IVFI_PASSWORD`. |
-| `IVFI_AUTH_RESTRICT` | | Regex; authenticate only matching paths. Uploads follow it. |
+| `IVFI_AUTH_RESTRICT` | | Regex; authenticate only matching paths. Uploads and folder creation follow it. |
 | `IVFI_UPLOAD` | `true` | Whether signed-in users may upload. |
 | `IVFI_UPLOAD_EXTENSIONS` | media types | Comma-separated allowlist, e.g. `jpg,png,mp4`. |
 | `IVFI_UPLOAD_OVERWRITE` | `false` | Whether an upload may replace an existing file. |
 | `IVFI_UPLOAD_DIRECTORIES` | `true` | Whether signed-in users may create folders. |
-| `IVFI_UPLOAD_RESTRICT` | | Regex; accept uploads only on matching paths. |
+| `IVFI_UPLOAD_RESTRICT` | | Regex; accept uploads and folder creation only on matching paths. |
 | `IVFI_MAX_UPLOAD_SIZE` | `100M` | Largest accepted file. The request body limits are set a megabyte above it, since the multipart envelope and the other fields are counted too. Cloudflare's proxy caps request bodies at 100 MB on most plans. |
 | `IVFI_BEHIND_PROXY` | `true` | Trust forwarded headers for the client address and HTTPS. |
 | `IVFI_CLIENT_IP_HEADER` | `CF-Connecting-IP` | Header carrying the client address. Use `X-Forwarded-For` without Cloudflare. |
