@@ -686,15 +686,26 @@ export default class galleryClass
 			'div.galleryContent > div.list > table'
 		);
 
-		const buffer: Array<string> = [];
+		/* Names are built as nodes, never parsed as markup, as a file name can
+		 * contain `<`, `"` or `&`. The `tbody` is explicit because the parser
+		 * used to insert it, and the optimizer selects `tbody > tr` */
+		const tbody: HTMLElement = DOM.new('tbody');
 
 		for(let i = 0; i <= items.length - 1; i++)
 		{
-			buffer[i] = `<tr title="${items[i].name}"><td>${items[i].name}</td></tr>`;
+			const row: HTMLElement = DOM.new('tr', {
+				title: items[i].name
+			});
+
+			row.appendChild(DOM.new('td', {
+				text: items[i].name
+			}));
+
+			tbody.appendChild(row);
 		}
 
-		/* Set directly all at once instead of appending (faster .. ? probably?) */
-		table.innerHTML = (buffer.join(''));
+		/* Swap in all rows at once instead of appending them one by one */
+		table.replaceChildren(tbody);
 
 		this.list = this.container.querySelector('div.galleryContent > div.list');
 		this.table = table;
@@ -764,10 +775,15 @@ export default class galleryClass
 
 		const options: Record<string, string> = this.getReverseOptions(this.data.selected.src);
 
-		container.innerHTML = Object.keys(options).map((site: string) =>
+		container.replaceChildren(...Object.keys(options).map((site: string) =>
 		{
-			return `<a class="reverse-link" target="_blank" href="${options[site]}">${site}</a>`;
-		}).join('');
+			return DOM.new('a', {
+				class: 'reverse-link',
+				target: '_blank',
+				href: options[site],
+				text: site
+			});
+		}));
 
 		this.container.querySelector(
 			':scope > div.galleryContent > div.media > div.wrapper > div.cover'
@@ -861,17 +877,25 @@ export default class galleryClass
 				title: `Download: ${item.name}`
 			});
 
-			const buffer: Array<string> = [
-				`<span>${index + 1} of ${max}</span>`,
-				`<a target="_blank" href="${url}">${name}</a>`
+			const nodes: Array<HTMLElement> = [
+				DOM.new('span', {
+					text: `${index + 1} of ${max}`
+				}),
+				DOM.new('a', {
+					target: '_blank',
+					href: url,
+					text: name
+				})
 			];
 
 			if(Object.prototype.hasOwnProperty.call(item, 'size') && !this.options.mobile)
 			{
-				buffer.push(`<span>${item.size}</span>`);
+				nodes.push(DOM.new('span', {
+					text: item.size
+				}));
 			}
 
-			left.innerHTML = buffer.join('');
+			left.replaceChildren(...nodes);
 
 			return true;
 		}
