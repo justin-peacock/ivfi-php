@@ -6,7 +6,6 @@ import { log } from '../../modules/logger';
 /** Types */
 import {
 	TPageObject,
-	ITableRowMI,
 	TOptimizeOptions,
 	TOptimizeScope,
 	TOptimizeRowItem,
@@ -46,11 +45,14 @@ export default class optimizeClass
 		[key: string]: number;
 	}];
 
-	private on: boolean | {
-		rowChange?: (
-			rows: Array<ITableRowMI> | NodeListOf<TOptimizeRowItem>
-		) => boolean | void;
-	};
+	/**
+	 * Matches `TOptimizeOptions['on']` exactly, so a consumer's callback
+	 * cannot be typed against a promise this class does not keep. The
+	 * shapes actually passed to `rowChange` (a `NodeList` in `setup()`, a
+	 * plain array from `getActiveData()`) are converted at the call site
+	 * instead of being folded into this type
+	 */
+	private on: TOptimizeOptions['on'];
 
 	constructor(options: TOptimizeOptions)
 	{
@@ -106,7 +108,7 @@ export default class optimizeClass
 		if(typeof this.on === 'object'
 			&& Object.prototype.hasOwnProperty.call(this.on, 'rowChange'))
 		{
-			this.on.rowChange(rows);
+			this.on.rowChange(Array.from(rows));
 		}
 
 		this.rows = Array.from(rows);

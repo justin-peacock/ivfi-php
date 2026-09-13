@@ -458,7 +458,7 @@ export default class galleryClass
 
 			if(index !== this.data.selected.index)
 			{
-				const elements: NodeList = this.container.querySelectorAll(
+				const elements = this.container.querySelectorAll<HTMLElement>(
 					':scope > div.galleryContent > div.media > div.wrapper img, \
 					:scope > div.galleryContent > div.media > div.wrapper video'
 				);
@@ -1042,7 +1042,7 @@ export default class galleryClass
 
 		const applyChange = (onChange?: () => void) =>
 		{
-			const elements: NodeList = this.container.querySelectorAll(':scope > \
+			const elements = this.container.querySelectorAll<HTMLElement>(':scope > \
 				div.galleryContent > div.media > div.wrapper > div:not(.cover)');
 
 			elements.forEach((element: HTMLElement) => element.remove());
@@ -1464,7 +1464,7 @@ export default class galleryClass
 				this.busy(false);
 				this.data.selected.index = index;
 
-				this.container.querySelectorAll(':scope > div.galleryContent > div.media > div.wrapper img, \
+				this.container.querySelectorAll<HTMLElement>(':scope > div.galleryContent > div.media > div.wrapper img, \
 					:scope > div.galleryContent > div.media > div.wrapper video').forEach((element: HTMLElement) =>
 				{
 					element.style.display = 'none';
@@ -1832,19 +1832,26 @@ export default class galleryClass
 			const swipeTarget = document.querySelector('body > div.rootGallery div.wrapper');
 
 			/* Handle swipe events */
-			swipeTarget.addEventListener('swiped', (e: SwipeEvent) =>
+			swipeTarget.addEventListener('swiped', (e: Event) =>
 			{
+				/**
+				 * `'swiped'` is not a known DOM event, so `addEventListener`
+				 * types its listener against the general `Event`. The vendor
+				 * script only ever dispatches this as a `SwipeEvent`
+				 */
+				const swipeEvent = e as SwipeEvent;
+
 				clearTimeout(swipeTimeout);
 
 				if(!swipeBreak)
 				{
-					if(e.detail.dir === 'down' || e.detail.dir === 'right')
+					if(swipeEvent.detail.dir === 'down' || swipeEvent.detail.dir === 'right')
 					{
 						/** Navigate forwards */
 						this.navigate(null, -1);
 
 						swipeBreak = true;
-					} else if(e.detail.dir === 'up' || e.detail.dir === 'left')
+					} else if(swipeEvent.detail.dir === 'up' || swipeEvent.detail.dir === 'left')
 					{
 						/** Navigate backwards */
 						this.navigate(null, 1);

@@ -194,7 +194,7 @@ eventHooks.listen(selector.use('TABLE') as HTMLElement, 'click', 'sortClick', (e
 			/* Check for a index property, use as index if found */
 			if(parent._mediaIndex) index = parent._mediaIndex;
 		} else {
-			(selector.use('TABLE') as HTMLElement).querySelectorAll(
+			(selector.use('TABLE') as HTMLElement).querySelectorAll<HTMLAnchorElement>(
 				'tr.file:not(.filtered) a.preview'
 			).forEach((element: HTMLAnchorElement, i: number) =>
 			{
@@ -368,7 +368,7 @@ if(config.get('mobile') === false
 	};
 
 	/* Get previewable elements */
-	const previewable = document.querySelectorAll('body > div.tableContainer > table > tbody > tr.file > td > a.preview');
+	const previewable = document.querySelectorAll<IPreviewAnchor>('body > div.tableContainer > table > tbody > tr.file > td > a.preview');
 
 	/* Set preview indexes */
 	previewable.forEach((preview: IPreviewAnchor, index) =>
