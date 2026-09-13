@@ -102,7 +102,7 @@ $config = [
         /* Set to a path relative to the root directory (location of this file) containg .css files.
          * Each .css file will be treated as a separate theme. Set to false to disable themes */
         'themes' => [
-          'path' => '/<%= indexerPath %>/themes/',
+          'path' => '<%= indexerPath %>themes/',
           'default' => false
         ],
          /* Cascading style sheets options */
@@ -1260,7 +1260,8 @@ function getThemes($basePath, $themesPath)
         if(is_dir($itemPath))
         {
           /* The current item is assumed to be a theme directory */
-          foreach(preg_grep('/^(' . $item . '|index)\.css$/', scandir(
+          /* Quoted, since a name such as `a(b` is not a valid expression */
+          foreach(preg_grep('/^(' . preg_quote($item, '/') . '|index)\.css$/', scandir(
             $itemPath, SCANDIR_SORT_NONE)
           ) as $theme)
           {
@@ -1290,6 +1291,16 @@ function getThemes($basePath, $themesPath)
 }
 
 /**
+ * Default configuration values, used for anything a config file leaves unset.
+ *
+ * Taken from the literal above rather than kept as a second copy, which had
+ * drifted: the copy defaulted the date to `m/d/y` and the icon to a `.png`
+ * while the file and the documentation said `d/m/y` and `.ico`, so a config
+ * file that left those out silently got different values from a bare install
+ */
+$defaults = $config;
+
+/**
  * Attempts to search for a configuration file.
  * 
  * If it exists, the default values will be overwritten.
@@ -1303,9 +1314,6 @@ if(file_exists(CONFIG_FILE))
 {
   $config = include('.' . CONFIG_FILE);
 }
-
-/* Default configuration values. Used if values from the above config are unset */
-$defaults = array('authentication' => false,'single_page' => false,'format' => array('title' => 'Index of %s','date' => array('m/d/y H:i', 'd/m/y'),'sizes' => array(' B', ' KiB', ' MiB', ' GiB', ' TiB')),'icon' => array('path' => '/favicon.png','mime' => 'image/png'),'sorting' => array('enabled' => false,'order' => SORT_ASC,'types' => 0,'sort_by' => 'name','use_mbstring' => false),'gallery' => array('enabled' => true,'reverse_options' => false,'scroll_interval' => 50,'list_alignment' => 0,'fit_content' => true,'image_sharpen' => false),'preview' => array('enabled' => true,'hover_delay' => 75,'cursor_indicator' => true),'extensions' => array('image' => array('jpg', 'jpeg', 'png', 'gif', 'ico', 'svg', 'bmp', 'webp'),'video' => array('webm', 'mp4', 'ogv', 'ogg', 'mov')),'inject' => false,'style' => array('themes' => array('path' => '/<%= indexerPath %>/themes/','default' => false),'css' => array('additional' => false),'compact' => false),'filter' => array('file' => false,'directory' => false),'exclude' => false,'directory_sizes' => array('enabled' => false, 'recursive' => false),'processor' => false,'encode_all' => false,'allow_direct_access' => false,'path_checking' => 'strict','trust_prepend_header' => false,'performance' => false,'footer' => array('enabled' => true, 'show_server_name' => true),'credits' => true,'debug' => false);
 
 /**
  * Call authentication function
@@ -1416,9 +1424,14 @@ if($footer['enabled'])
 
 if($config['style']['themes']['path'])
 {
-  $config['style']['themes']['path'] = Helpers::stringWrap(
+  /**
+   * Collapsed as well as wrapped, because the client compares this value
+   * against stylesheet URLs, which never carry a doubled slash. A value with
+   * one matched nothing, so switching themes left the previous sheet in place
+   */
+  $config['style']['themes']['path'] = preg_replace('#/+#', '/', Helpers::stringWrap(
     $config['style']['themes']['path'], '/'
-  );
+  ));
 }
 
 if(!is_array($config['format']['date']))
@@ -2568,13 +2581,19 @@ class Indexer extends Helpers
    */ 
   private function getReadableFileSize($bytes, $decimals = 1)
   {
-    if($bytes === 0)
+    /* A failed `filesize()` arrives as false or -1, and neither is a size */
+    if($bytes < 1)
     {
       return '0' . $this->format['sizes'][0];
     }
 
     $base = log($bytes, 1024);
-    $floored = floor($base);
+
+    /**
+     * Anything past the last configured unit is shown in that unit rather
+     * than indexing past the end of the array
+     */
+    $floored = min((int) floor($base), count($this->format['sizes']) - 1);
     $value = pow(1024, $base - $floored);
 
     if($value >= 100)
@@ -2608,10 +2627,9 @@ $cookies = array(
 );
 
 /* Override the config value if the cookie value is set */
-if($validate && isset($client['style']['compact'])
-  && $client['style']['compact'])
+if($validate && !empty($client['style']['compact']))
 {
-  $config['style']['compact'] = $client['style']['compact'];
+  $config['style']['compact'] = true;
 }
 
 /* Set sorting settings */
@@ -2826,7 +2844,15 @@ if(count($themes) > 0)
   if(is_array($client)
     && isset($client['style']['theme']))
   {
-    $currentTheme = $client['style']['theme'] ? $client['style']['theme'] : NULL;
+    /**
+     * The cookie is client input, so the value is only honoured when it names
+     * a theme that exists. Anything else, including a non-string, used to be
+     * passed straight to `strtolower()`, which is a fatal error on an array
+     */
+    $currentTheme = (is_string($client['style']['theme'])
+      && isset($themes[strtolower($client['style']['theme'])]))
+      ? strtolower($client['style']['theme'])
+      : NULL;
   /* Check for a default theme */
   } else if(isset($config['style']['themes']['default']))
   {
@@ -2841,7 +2867,7 @@ if(count($themes) > 0)
 
 /* Apply compact mode if that is set */
 $compact = (is_array($client) && isset($client['style']['compact']))
-  ? $client['style']['compact']
+  ? (bool) $client['style']['compact']
   : $config['style']['compact'];
 
 if(is_array($config['style']['css']['additional']))

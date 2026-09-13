@@ -15,12 +15,14 @@ namespace Ivfi\Tests\Support;
 final class Indexer
 {
     /**
-     * @param array<string, string> $server Extra $_SERVER values
+     * @param array<string, string> $server  Extra $_SERVER values
+     * @param array<string, string> $cookies Request cookies, by name
      */
     public static function render(
         Fixture $fixture,
         string $uri = '/',
-        array $server = []
+        array $server = [],
+        array $cookies = []
     ): Response {
         $server = array_merge([
             'REQUEST_URI'     => $uri,
@@ -39,8 +41,9 @@ final class Indexer
         );
 
         $written = file_put_contents($runner, sprintf(
-            "<?php\n\$_SERVER = array_merge(\$_SERVER, %s);\nrequire %s;\n",
+            "<?php\n\$_SERVER = array_merge(\$_SERVER, %s);\n\$_COOKIE = %s;\nrequire %s;\n",
             var_export($server, true),
+            var_export($cookies, true),
             var_export($fixture->root() . '/indexer.php', true)
         ));
 
@@ -188,6 +191,20 @@ final class Response
         preg_match_all('#<tr class="(?:file|directory|parent)">.*?</tr>#s', $this->body, $m);
 
         return implode("\n", $m[0]);
+    }
+
+    /**
+     * The configuration object the page hands to its script.
+     *
+     * @return array<string, mixed>
+     */
+    public function jsConfig(): array
+    {
+        preg_match('#<script id="__IVFI_DATA__" type="application/json">(.*?)</script>#s', $this->body, $m);
+
+        $decoded = json_decode($m[1] ?? '', true);
+
+        return is_array($decoded) ? $decoded : [];
     }
 
     public function title(): string
