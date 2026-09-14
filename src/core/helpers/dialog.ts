@@ -28,6 +28,44 @@ type TDialogOptions = {
 let sequence = 0;
 
 /**
+ * The browser's own dialogs, for a client without `showModal()`.
+ *
+ * Older Safari and some embedded web views lack it. Falling back is better
+ * than the alternative: an exception after the dialog was appended, and a
+ * promise that never settles, which leaves every button that asks a question
+ * doing nothing at all
+ */
+const openNative = (options: TDialogOptions): Promise<string | null> =>
+{
+	const message = options.description
+		? `${options.title}\n\n${options.description}`
+		: options.title;
+
+	if(options.input)
+	{
+		return Promise.resolve(window.prompt(message, ''));
+	}
+
+	if(options.cancelLabel)
+	{
+		return Promise.resolve(window.confirm(message) ? '' : null);
+	}
+
+	window.alert(message);
+
+	return Promise.resolve('');
+};
+
+/**
+ * Whether modal `<dialog>` elements work here
+ */
+const supportsModal = (): boolean =>
+{
+	return typeof HTMLDialogElement === 'function'
+		&& typeof HTMLDialogElement.prototype.showModal === 'function';
+};
+
+/**
  * Opens a dialog and settles once it closes.
  *
  * Resolves with the field's value (an empty string when there is no field)
@@ -36,6 +74,11 @@ let sequence = 0;
  */
 const open = (options: TDialogOptions): Promise<string | null> =>
 {
+	if(!supportsModal())
+	{
+		return openNative(options);
+	}
+
 	return new Promise((resolve) =>
 	{
 		const id = `ivfiDialog${++sequence}`;
@@ -142,7 +185,22 @@ const open = (options: TDialogOptions): Promise<string | null> =>
 		});
 
 		document.body.append(dialog);
-		dialog.showModal();
+
+		/**
+		 * Can still throw where the method exists, in an environment that
+		 * refuses modals. The dialog is taken back out and the question asked
+		 * natively, so the promise settles either way
+		 */
+		try
+		{
+			dialog.showModal();
+		} catch
+		{
+			dialog.remove();
+			openNative(options).then(resolve);
+
+			return;
+		}
 
 		/* A destructive question starts on the safe answer */
 		if(input)

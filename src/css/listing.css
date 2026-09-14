@@ -39,8 +39,9 @@
       }
     }
 
-    > div.extend {
-      @apply order-last ml-auto inline-flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-lg text-muted-foreground transition-colors select-none hover:bg-muted hover:text-foreground;
+    /* The menu button */
+    > .extend {
+      @apply order-last ml-auto inline-flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-lg text-muted-foreground transition-colors outline-none select-none hover:bg-muted hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50;
 
       &[extended] {
         @apply bg-muted text-foreground;
@@ -55,7 +56,7 @@
     top: var(--topbar-height);
 
     > div {
-      @apply flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 whitespace-nowrap hover:bg-accent hover:text-accent-foreground;
+      @apply flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 whitespace-nowrap outline-none hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent focus-visible:text-accent-foreground;
 
       > svg.icon {
         @apply text-muted-foreground;

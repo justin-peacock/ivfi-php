@@ -39,7 +39,9 @@ const main: MComponentMain.TCapsule = {
 main.menu.create = () =>
 {
 	const container: HTMLElement = DOM.new('div', {
-		class : 'menu'
+		class : 'menu',
+		role : 'menu',
+		'aria-label' : 'Menu'
 	});
 	
 	const items: Array<{
@@ -103,9 +105,12 @@ main.menu.create = () =>
 
 	items.forEach((item) =>
 	{
+		/* Focused by `focusItem()` rather than by Tab, as a menu's items are */
 		const element = DOM.new('div', {
 			text : item.text,
-			class : `${Object.prototype.hasOwnProperty.call(item, 'class') ? `${item.class}` : ''}`
+			class : `${Object.prototype.hasOwnProperty.call(item, 'class') ? `${item.class}` : ''}`,
+			role : 'menuitem',
+			tabindex : '-1'
 		});
 
 		if(Object.prototype.hasOwnProperty.call(item, 'id'))
@@ -117,6 +122,42 @@ main.menu.create = () =>
 		element.prepend(iconElement(item.icon));
 
 		container.append(element);
+	});
+
+	/**
+	 * Keyboard use of an open menu. Enter and Space click the focused item, so
+	 * activation goes through the same delegated click handler as the pointer
+	 */
+	eventHooks.listen(container, 'keydown', 'menuItemKeyDown', (event: KeyboardEvent) =>
+	{
+		const items = main.menu.items();
+		const index = items.indexOf(document.activeElement as HTMLElement);
+
+		if(event.key === 'Enter' || event.key === ' ')
+		{
+			if(index !== -1)
+			{
+				event.preventDefault();
+				items[index].click();
+			}
+		} else if(event.key === 'ArrowDown' || event.key === 'ArrowUp')
+		{
+			event.preventDefault();
+			main.menu.focusItem(event.key === 'ArrowDown' ? index + 1 : index - 1);
+		} else if(event.key === 'Home' || event.key === 'End')
+		{
+			event.preventDefault();
+			main.menu.focusItem(event.key === 'Home' ? 0 : items.length - 1);
+		} else if(event.key === 'Escape' || event.key === 'Tab')
+		{
+			if(event.key === 'Escape')
+			{
+				event.preventDefault();
+			}
+
+			main.menu.toggle(false);
+			(selector.use('TOP_EXTEND') as HTMLElement).focus();
+		}
 	});
 
 	/* Event delegation */
@@ -184,14 +225,49 @@ main.menu.toggle = (state: null | boolean = null) =>
 		display
 	});
 
-	if(isHidden)
+	const button = selector.use('TOP_EXTEND') as HTMLElement;
+
+	/* Follows where the menu ended up, which a forced state can make differ from a flip */
+	if(display !== 'none')
 	{
-		(selector.use('TOP_EXTEND') as HTMLElement).setAttribute('extended', 'true');
+		button.setAttribute('extended', 'true');
+		button.setAttribute('aria-expanded', 'true');
 	} else {
-		(selector.use('TOP_EXTEND') as HTMLElement).removeAttribute('extended');
+		button.removeAttribute('extended');
+		button.setAttribute('aria-expanded', 'false');
 	}
 
 	return isHidden;
+};
+
+/**
+ * The menu's items that are currently shown
+ *
+ * `#gallery` is hidden while a filter leaves no media, and focus must skip it
+ */
+main.menu.items = (): Array<HTMLElement> =>
+{
+	const menu = document.querySelector('body > div.menu');
+
+	return menu
+		? Array.from(menu.querySelectorAll<HTMLElement>(':scope > [role="menuitem"]'))
+			.filter((item: HTMLElement) => item.style.display !== 'none')
+		: [];
+};
+
+/**
+ * Focuses a menu item by position, wrapping around either end
+ */
+main.menu.focusItem = (index: number): void =>
+{
+	const items = main.menu.items();
+
+	if(items.length === 0)
+	{
+		return;
+	}
+
+	items[((index % items.length) + items.length) % items.length].focus();
 };
 
 /**

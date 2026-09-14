@@ -4749,7 +4749,7 @@ $jsConfig = constructJsConfig(
   <body class="rootDirectory<?=$compact ? ' compact' : ''?><?=!$footer['enabled'] ? ' pb' : ''?>" is-loading<?=$config['performance'] ? ' optimize' : '';?> root>
     <?=$getInjectable('body');?>
     <div class="topBar">
-        <div class="extend" title="Menu"><?=Helpers::icon('menu');?></div>
+        <button type="button" class="extend" title="Menu" aria-label="Menu" aria-haspopup="menu" aria-expanded="false"><?=Helpers::icon('menu');?></button>
         <div class="directoryInfo">
           <div data-count="size"><?=$data['size']['readable'];?></div>
           <?=generateCountDiv(
