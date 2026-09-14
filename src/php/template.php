@@ -3521,8 +3521,11 @@ class Indexer extends Helpers
    * `--file-*` tokens in `theme.css`. Image and video also come from the
    * `extensions` option, which decides what previews; these lists only add
    * icons for formats the browser cannot preview.
+   *
+   * No visibility modifier: constants only accept one from PHP 7.1, and the
+   * script still runs on 7.0.
    */
-  private const FILE_KINDS = [
+  const FILE_KINDS = [
     'image' => ['icon' => 'file-image', 'extensions' => [
       'tif', 'tiff', 'heic', 'heif', 'avif', 'jxl', 'psd', 'ai', 'eps', 'raw',
       'dng', 'cr2', 'cr3', 'nef', 'arw', 'orf', 'raf', 'xcf'
