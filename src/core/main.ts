@@ -413,17 +413,14 @@ if(config.get('singlePage'))
 		}
 		
 		/* Get location data */
-		const windowProtocol = window.location.protocol,
-			windowPort = window.location.port,
-			windowHostName = window.location.hostname + (
-				(windowPort && windowPort !== '80'
-					|| windowPort !== '443') ? ':' + windowPort : ''
-			),
-			windowSubPath = location.replace(/([^:]\/)\/+/g, '$1').replace(/^\/|\/$/g, '');
+		const windowSubPath = location.replace(/([^:]\/)\/+/g, '$1').replace(/^\/|\/$/g, '');
 
-		/* Construct upcoming title and URL */
-		const nextLocation = `${windowProtocol}//${windowHostName}/${windowSubPath ? windowSubPath + '/' : ''}`,
-			nextTitle = config.get('format').title.replace('%s', `/${windowSubPath}/`);
+		/* The root has no sub path, and `//` would be read as a protocol-relative URL */
+		const nextPath = windowSubPath ? `/${windowSubPath}/` : '/';
+
+		/* Construct upcoming title and URL. `origin` only carries a port when it is not the default for the scheme */
+		const nextLocation = `${window.location.origin}${nextPath}`,
+			nextTitle = config.get('format').title.replace('%s', nextPath);
 
 		/* Create POST body */
 		const postData = Object.entries({
@@ -461,7 +458,7 @@ if(config.get('singlePage'))
 		};
 
 		/* Fetch new document */
-		fetch(`/${windowSubPath}/`, {
+		fetch(nextPath, {
 			method: 'POST',
 			redirect: 'follow',
 			headers: {
@@ -489,7 +486,7 @@ if(config.get('singlePage'))
 					if(pushState)
 					{
 						window.history.pushState({
-							path: '/' + windowSubPath
+							path: nextPath
 						}, nextTitle, nextLocation);
 					}
 	
