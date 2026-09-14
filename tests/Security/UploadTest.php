@@ -583,6 +583,104 @@ final class UploadTest extends IndexerTestCase
         $this->assertFileDoesNotExist($this->root() . '/shell.php');
     }
 
+    /**
+     * Listing `html` is not enough on its own: a page served from the indexed
+     * directory runs as this origin, so it stays refused unless the operator
+     * has said the server sandboxes it.
+     */
+    public function testHtmlStaysRefusedUnlessTheServerSandboxesIt(): void
+    {
+        $server = $this->serve(['extensions' => ['jpg', 'html']]);
+        $token = $this->signIn($server);
+
+        $extensions = $this->jsConfig($server->request('/'))['upload']['extensions'] ?? [];
+
+        $this->assertNotContains('html', $extensions);
+
+        [, $payload] = $this->upload($server, $token, 'page.html', '<p>hi</p>');
+
+        $this->assertFalse($payload['ok'] ?? false);
+        $this->assertFileDoesNotExist($this->root() . '/page.html');
+    }
+
+    /**
+     * Where the web server sandboxes pages, an allowlisted `html` or `htm`
+     * file is accepted like any other.
+     */
+    #[DataProvider('sandboxedPageNames')]
+    public function testAnAllowlistedPageIsAcceptedWhereTheServerSandboxesIt(string $name): void
+    {
+        $server = $this->serve([
+            'extensions' => ['jpg', 'html', 'htm'],
+            'sandboxed_html' => true,
+        ]);
+        $token = $this->signIn($server);
+
+        $extensions = $this->jsConfig($server->request('/'))['upload']['extensions'] ?? [];
+
+        $this->assertContains('html', $extensions);
+        $this->assertContains('htm', $extensions);
+
+        [$response, $payload] = $this->upload($server, $token, $name, '<p>hi</p>');
+
+        $this->assertSame('201 Created', $response->header('Status'));
+        $this->assertTrue($payload['ok'] ?? false);
+        $this->assertSame('<p>hi</p>', file_get_contents($this->root() . '/' . $name));
+    }
+
+    /**
+     * @return array<string, array{0: string}>
+     */
+    public static function sandboxedPageNames(): array
+    {
+        return [
+            'html'      => ['page.html'],
+            'htm'       => ['page.htm'],
+            'uppercase' => ['PAGE.HTML'],
+        ];
+    }
+
+    /**
+     * Sandboxing pages opens `html` and `htm` and nothing else. An SVG is an
+     * image everywhere else, and a page type named before the real extension
+     * is served however the server reads the name, without the sandbox that is
+     * keyed to the last extension.
+     */
+    #[DataProvider('stillRefusedWhenPagesAreSandboxed')]
+    public function testSandboxingPagesOpensNothingElse(string $name): void
+    {
+        $server = $this->serve([
+            'extensions' => ['jpg', 'html', 'svg', 'xhtml', 'xml'],
+            'sandboxed_html' => true,
+        ]);
+        $token = $this->signIn($server);
+
+        $extensions = $this->jsConfig($server->request('/'))['upload']['extensions'] ?? [];
+
+        $this->assertNotContains('svg', $extensions);
+        $this->assertNotContains('xhtml', $extensions);
+        $this->assertNotContains('xml', $extensions);
+
+        [, $payload] = $this->upload($server, $token, $name, '<p>hi</p>');
+
+        $this->assertFalse($payload['ok'] ?? false, sprintf('%s was accepted', $name));
+        $this->assertFileDoesNotExist($this->root() . '/' . $name);
+    }
+
+    /**
+     * @return array<string, array{0: string}>
+     */
+    public static function stillRefusedWhenPagesAreSandboxed(): array
+    {
+        return [
+            'svg'               => ['drawing.svg'],
+            'xhtml'             => ['page.xhtml'],
+            'xml'               => ['feed.xml'],
+            'html before jpg'   => ['page.html.jpg'],
+            'php before html'   => ['shell.php.html'],
+        ];
+    }
+
     public function testANameThatClimbsOutOfTheDirectoryIsFlattened(): void
     {
         $server = $this->serve();
