@@ -96,7 +96,7 @@ final class AuthenticationTest extends IndexerTestCase
         $response = $this->serve()->request('/');
 
         $this->assertStringNotContainsString('private.jpg', $response->body);
-        $this->assertStringNotContainsString('<tr class="file">', $response->body);
+        $this->assertStringNotContainsString('<tr class="file"', $response->body);
     }
 
     public function testCorrectPasswordSignsIn(): void
