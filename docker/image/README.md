@@ -27,7 +27,7 @@ otherwise interpolated away.
 | `IVFI_PASSWORD_HASH` | | A `password_hash()` value, used instead of `IVFI_PASSWORD`. |
 | `IVFI_AUTH_RESTRICT` | | Regex; authenticate only matching paths. Uploads and folder creation follow it. |
 | `IVFI_UPLOAD` | `true` | Whether signed-in users may upload. |
-| `IVFI_UPLOAD_EXTENSIONS` | media types | Comma-separated allowlist, e.g. `jpg,png,mp4`. |
+| `IVFI_UPLOAD_EXTENSIONS` | media types | Comma-separated allowlist, e.g. `jpg,png,mp4`. `html` and `htm` are accepted too, and served sandboxed, see below. |
 | `IVFI_UPLOAD_OVERWRITE` | `false` | Whether an upload may replace an existing file. |
 | `IVFI_UPLOAD_DIRECTORIES` | `true` | Whether signed-in users may create folders. |
 | `IVFI_UPLOAD_DELETE` | `true` | Whether signed-in users may delete files and empty folders. Deleting is permanent. |
@@ -54,6 +54,21 @@ visitor can send the header themselves, choose their own lockout bucket, and
 guess passwords indefinitely. That is fine when the proxy is the only ingress,
 which is the point to confirm rather than assume: publish the container to the
 proxy alone, not to a host port.
+
+## Pages are served sandboxed
+
+An HTML page or SVG served from `/data` would run as the index's own origin,
+next to the signed-in session. nginx sends `Content-Security-Policy: sandbox`
+(without `allow-same-origin`) for those formats, so a page gets an opaque
+origin instead: its scripts, styles, images, forms and popups still work, but it
+cannot act as whoever opened it. The trade is that it has no `localStorage`,
+cookies or same-origin `fetch()` of its own, so data a page loads with `fetch()`
+has to be inlined.
+
+That is what makes `html` and `htm` safe to list in `IVFI_UPLOAD_EXTENSIONS`,
+and the image sets `sandboxed_html` for it. `svg`, `xhtml` and the other active
+formats stay refused for upload, as does a page extension anywhere but the end
+of a name.
 
 ## Direct file URLs are not gated
 

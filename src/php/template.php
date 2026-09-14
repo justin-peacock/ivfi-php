@@ -53,6 +53,7 @@ $config = [
      *     'overwrite' => false,
      *     'directories' => true,                 // allow creating folders too
      *     'delete' => false,                     // allow deleting files and empty folders
+     *     'sandboxed_html' => false,             // the server sandboxes .html, see below
      *     'restrict' => '/^\/(incoming)\/?/i'   // optional, only these paths
      *   ]
      */
@@ -85,6 +86,18 @@ $config = [
        * undone. Same gate as an upload otherwise
        */
       'delete' => false,
+      /**
+       * Whether `html` and `htm` may be allowlisted.
+       *
+       * An HTML page served from the indexed directory runs as this origin,
+       * next to the signed-in session, so these are refused like the rest of
+       * the active content unless the web server takes that away. Turn this
+       * on only where it sends `Content-Security-Policy: sandbox` (without
+       * `allow-same-origin`) for those files, as the container image does.
+       * It lets them onto the allowlist and nothing more: they still have to
+       * be listed in `extensions`
+       */
+      'sandboxed_html' => false,
       /* Optional pattern, so only some of the authenticated paths accept uploads */
       'restrict' => false
     ],
@@ -739,6 +752,14 @@ define('UPLOAD_ACTIVE_EXTENSIONS', [
   'svg', 'svgz', 'html', 'htm', 'xhtml', 'xht', 'mhtml', 'mht',
   'xml', 'xsl', 'xslt', 'swf'
 ]);
+/**
+ * Active content that `upload.sandboxed_html` lets onto the allowlist.
+ *
+ * Only these two: they are the pages someone means to publish, and every other
+ * entry above is either an image that no allowlist should turn into markup or
+ * a format no one uploads on purpose
+ */
+define('UPLOAD_SANDBOXABLE_EXTENSIONS', ['html', 'htm']);
 
 /**
  * The first value of a possibly chained forwarding header
@@ -1413,12 +1434,25 @@ function authenticate($users, $realm, $options = [])
 /**
  * Whether an extension is refused whatever the allowlist says
  *
+ * Upload options are only passed where the extension is a file's last one,
+ * the one the web server picks a type by. A sandboxed `html` stays refused
+ * anywhere else in a name, because `AddType` on Apache matches any extension,
+ * and `page.html.jpg` would be served as a page without the sandbox that is
+ * keyed to its real extension
+ *
  * @param String  $extension  A lowercase extension, without the dot
+ * @param Array   $options    Upload options, when this is a final extension
  *
  * @return Boolean
  */
-function uploadIsRefusedExtension($extension)
+function uploadIsRefusedExtension($extension, $options = [])
 {
+  if(!empty($options['sandboxed_html'])
+    && in_array($extension, UPLOAD_SANDBOXABLE_EXTENSIONS, true))
+  {
+    return false;
+  }
+
   return in_array($extension, UPLOAD_BLOCKED_EXTENSIONS, true)
     || in_array($extension, UPLOAD_ACTIVE_EXTENSIONS, true);
 }
@@ -1571,7 +1605,7 @@ function uploadAllowedExtensions($options, $extensions)
      * here has written an upload form for a web shell, and the likeliest way
      * for that to happen is a list copied from somewhere else
      */
-    if(uploadIsRefusedExtension($extension))
+    if(uploadIsRefusedExtension($extension, is_array($options) ? $options : []))
     {
       if($configured)
       {

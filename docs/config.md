@@ -120,8 +120,9 @@ once the request has arrived.
 
 > **If you serve HTML files from an indexed directory**, remember they run on the
 > same origin as this page. Anything in such a file executes as first-party script
-> and can act with the signed-in session. Host untrusted or third-party HTML on a
-> separate hostname.
+> and can act with the signed-in session. Either have the web server send
+> `Content-Security-Policy: sandbox` (without `allow-same-origin`) for them, as the
+> container image does, or host them on a separate hostname.
 
 Example:
 ```php
@@ -153,6 +154,7 @@ directory being viewed. Disabled by default.
 | `overwrite` | Bool | `false` | Whether an upload may replace a file that is already there. |
 | `directories` | Bool | `true` | Whether folders may be created as well as files uploaded. |
 | `delete` | Bool | `false` | Whether files and empty folders may be deleted. Deleting is permanent. |
+| `sandboxed_html` | Bool | `false` | Whether `html` and `htm` may be listed in `extensions`. Only turn on where the web server sandboxes those files, see [Uploading pages](#uploading-pages). |
 | `restrict` | Bool/String | `false` | Applies uploads, folder creation and deletion only to paths matching the expression, the way `authentication`'s own `restrict` does. |
 
 ### Authentication is required
@@ -188,6 +190,26 @@ has to be on it. Two things happen regardless of what you configure:
   `drawing.svg.jpg` are refused. Apache's `AddHandler` matches any extension in
   a name rather than the last one, and on a host configured that way such a file
   is served as PHP.
+
+### Uploading pages
+
+`html` and `htm` can be uploaded where the web server takes their origin away.
+Send this header for pages served from the indexed directory:
+
+```
+Content-Security-Policy: sandbox allow-scripts allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-downloads
+```
+
+Without `allow-same-origin`, a page gets an opaque origin. Its scripts, styles,
+images, forms and popups work, but it cannot act with this page's session, and
+it has no storage (`localStorage`, cookies) or same-origin `fetch()` of its own,
+so a page that loads data with `fetch()` needs that data inlined.
+
+Then set `'sandboxed_html' => true` and list the extensions. Only `html` and
+`htm` are opened: `svg`, `xhtml` and the rest stay refused, as does `html`
+anywhere but the end of a name (`page.html.jpg`), since the header is keyed to
+the last extension. The container image does both, and its nginx sandboxes every
+active format served from `/data`, so only the extensions need listing there.
 
 Beyond that: a leading dot is stripped, so an upload cannot create a dotfile; a
 name that describes a path is reduced to its last segment, so it cannot climb

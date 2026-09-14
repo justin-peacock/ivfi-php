@@ -60,6 +60,8 @@ if ($username !== null && ($password !== null || $hash !== null)) {
         'overwrite' => flag('IVFI_UPLOAD_OVERWRITE', false),
         'directories' => flag('IVFI_UPLOAD_DIRECTORIES', true),
         'delete' => flag('IVFI_UPLOAD_DELETE', true),
+        /* nginx.conf sandboxes .html from /data, so listing it is safe here */
+        'sandboxed_html' => true,
     ];
 
     if (($restrict = env('IVFI_UPLOAD_RESTRICT')) !== null) {
