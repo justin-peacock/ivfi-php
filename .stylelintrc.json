@@ -1,10 +1,48 @@
 {
-    "extends": "stylelint-config-standard-scss",
+    "extends": "stylelint-config-standard",
     "rules": {
         "selector-class-pattern": null,
         "selector-id-pattern": null,
         "no-descending-specificity": null,
-        "color-function-notation": "modern",
-        "hue-degree-notation": "angle"
+        "at-rule-no-unknown": [
+            true,
+            {
+                "ignoreAtRules": [
+                    "theme",
+                    "source",
+                    "utility",
+                    "variant",
+                    "custom-variant",
+                    "apply",
+                    "reference",
+                    "plugin",
+                    "config"
+                ]
+            }
+        ],
+        "at-rule-no-deprecated": [
+            true,
+            {
+                "ignoreAtRules": [
+                    "apply"
+                ]
+            }
+        ],
+        "import-notation": "string",
+        "lightness-notation": null,
+        "hue-degree-notation": null,
+        "number-max-precision": null,
+        "declaration-property-value-no-unknown": null,
+        "function-no-unknown": [
+            true,
+            {
+                "ignoreFunctions": [
+                    "theme",
+                    "--alpha",
+                    "--spacing"
+                ]
+            }
+        ],
+        "at-rule-prelude-no-invalid": null
     }
 }

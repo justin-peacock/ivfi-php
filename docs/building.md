@@ -56,6 +56,20 @@ You can edit `build.options.json` to enable extra features or change output opti
 
 * `assetDir` sets the directory where resources (`.js`, `.css` and fonts) will be placed in. This also affects any references in the HTML/CSS.
 
+## Styles
+
+The stylesheet is Tailwind CSS v4, built through PostCSS, with the design tokens of the shadcn preset `bciy3lNA` (zinc base, lime primary, the Geist font). `src/css/index.css` is the only entry and imports the rest:
+
+* `theme.css`: the tokens, light and dark, and the `mobile`, `desktop` and `dark` variants.
+* `fonts.css`: Geist Variable, bundled from `src/assets/fonts`.
+* `base.css`, `listing.css`, `settings.css`, `gallery.css` and `upload.css`: the page, by area.
+
+The markup keeps its semantic class names, because the scripts, the tests and themes select on them, so the styles apply utilities to those classes with `@apply` rather than putting utility classes in the HTML. No source files are scanned for class names. If markup ever needs a utility class directly, add an `@source` for that file to `index.css`.
+
+The icons are [Lucide](https://lucide.dev) (ISC License), inlined as SVG from `src/core/helpers/icons.ts` and `Helpers::icon()` in the template.
+
+`npm run lint` checks the TypeScript with ESLint and the CSS with Stylelint.
+
 ## Testing
 
 The PHP suite runs against the **built** `indexer.php` rather than the webpack

@@ -10,3 +10,5 @@ export * from './generateWget';
 export * from './stringUtils';
 export * from './objUtils';
 export * from './previewUtils';
+export * from './icons';
+export * from './dialog';

@@ -1,0 +1,158 @@
+/**
+ * Uploads, folder creation, deletion, and the dialog they ask questions with.
+ */
+
+@layer components {
+  /* Full-window target, shown only while files are dragged over the page */
+  body > div.uploadDrop {
+    @apply pointer-events-none fixed inset-0 z-[70] bg-background/80 p-5 opacity-0 transition-opacity duration-100 supports-backdrop-filter:backdrop-blur-xs;
+
+    &.visible {
+      @apply opacity-100;
+    }
+
+    > div.uploadDropInner {
+      @apply flex size-full flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed border-muted-foreground/40 text-base font-medium text-foreground;
+
+      > svg.icon {
+        @apply size-8 text-muted-foreground;
+      }
+    }
+  }
+
+  /* Queue, anchored out of the way of the listing */
+  body > div.uploadPanel {
+    @apply fixed right-4 bottom-4 z-[65] w-86 max-w-[calc(100%-2rem)] overflow-hidden rounded-xl bg-popover text-sm text-popover-foreground shadow-lg ring-1 ring-foreground/10 mobile:inset-x-2 mobile:bottom-2 mobile:w-auto mobile:max-w-none;
+
+    > div.uploadHeader {
+      @apply flex items-center justify-between border-b px-3 py-2;
+
+      > div.uploadTitle {
+        @apply font-medium;
+      }
+
+      > button.uploadClose {
+        @apply inline-flex size-7 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors outline-none hover:bg-muted hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50;
+      }
+    }
+
+    > div.uploadList {
+      /* Roughly six rows, past which the queue scrolls instead of growing */
+      @apply max-h-72 overflow-y-auto;
+
+      > div.uploadItem {
+        @apply px-3 py-2;
+
+        & + div.uploadItem {
+          @apply border-t;
+        }
+
+        > div.uploadMeta {
+          @apply flex items-baseline justify-between gap-3 text-xs;
+
+          > div.uploadName {
+            @apply min-w-0 flex-1 truncate text-foreground;
+          }
+
+          > div.uploadStatus {
+            @apply max-w-[55%] shrink truncate text-muted-foreground tabular-nums;
+          }
+        }
+
+        > div.uploadBar {
+          @apply mt-1.5 h-1 overflow-hidden rounded-full bg-muted;
+
+          > div.uploadBarFill {
+            @apply h-full w-0 rounded-full bg-primary transition-[width] duration-150 ease-linear;
+          }
+        }
+
+        &.done > div.uploadBar > div.uploadBarFill {
+          @apply bg-primary;
+        }
+
+        &.failed {
+          > div.uploadMeta > div.uploadStatus {
+            @apply text-destructive;
+          }
+
+          > div.uploadBar > div.uploadBarFill {
+            @apply bg-destructive;
+          }
+        }
+      }
+    }
+
+    /* Carries outcomes to screen readers; there is nothing here to see */
+    > div.uploadAnnouncer {
+      @apply sr-only;
+    }
+  }
+
+  /**
+   * Floated ahead of the path, which hides its overflow and so narrows to sit
+   * beside it. Kept no taller than the path's line, or the table below would
+   * narrow around whatever hung past it
+   */
+  body > button.newFolder {
+    @apply float-right mt-6 mr-4 ml-3 inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-md border bg-background px-2.5 text-[0.8rem] font-medium whitespace-nowrap text-foreground transition-colors outline-none hover:bg-muted focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 dark:border-input dark:bg-input/30 dark:hover:bg-input/50 mobile:mt-4 mobile:mr-2;
+  }
+
+  /* A folder's type cell only holds a dash, which the delete control replaces */
+  body > div.tableContainer > table.deletable > tbody > tr.directory > td:last-child > span {
+    @apply hidden;
+  }
+
+  body > div.tableContainer > table > tbody > tr > td > button.deleteItem {
+    @apply inline-flex size-7 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors outline-none hover:bg-destructive/10 hover:text-destructive focus-visible:ring-3 focus-visible:ring-destructive/20;
+  }
+
+  /* Confirmations and prompts, in place of the browser's own dialogs */
+  dialog.ivfiDialog {
+    @apply fixed inset-0 m-auto grid w-full max-w-[calc(100%-2rem)] gap-4 rounded-xl bg-popover p-4 text-sm text-popover-foreground shadow-lg ring-1 ring-foreground/10 sm:max-w-sm;
+
+    &:not([open]) {
+      display: none;
+    }
+
+    &::backdrop {
+      @apply bg-black/10 supports-backdrop-filter:backdrop-blur-xs;
+    }
+
+    > form {
+      @apply grid gap-4;
+    }
+
+    .ivfiDialogTitle {
+      @apply text-base leading-snug font-medium;
+    }
+
+    .ivfiDialogDescription {
+      @apply break-words text-muted-foreground;
+    }
+
+    input[type="text"] {
+      @apply h-8 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-1 text-base text-foreground transition-colors outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:text-sm dark:bg-input/30;
+    }
+
+    .ivfiDialogFooter {
+      @apply -mx-4 -mb-4 flex flex-col-reverse gap-2 rounded-b-xl border-t bg-muted/50 p-4 sm:flex-row sm:justify-end;
+    }
+
+    button {
+      @apply inline-flex h-8 shrink-0 cursor-pointer items-center justify-center rounded-lg border border-transparent px-2.5 text-sm font-medium whitespace-nowrap transition-all outline-none select-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50;
+
+      &[data-variant="default"] {
+        @apply bg-primary text-primary-foreground hover:bg-primary/80;
+      }
+
+      &[data-variant="outline"] {
+        @apply border-border bg-background hover:bg-muted dark:border-input dark:bg-input/30 dark:hover:bg-input/50;
+      }
+
+      &[data-variant="destructive"] {
+        @apply bg-destructive/10 text-destructive hover:bg-destructive/20 focus-visible:border-destructive/40 focus-visible:ring-destructive/20 dark:bg-destructive/20 dark:hover:bg-destructive/30;
+      }
+    }
+  }
+}

@@ -194,17 +194,20 @@ const config = (env, argv) => {
 					loader: 'ts-loader'
 				},
 				{
-					test: /\.s[ac]ss$/i,
+					/**
+					 * One stylesheet entry, `src/css/index.css`. Tailwind resolves its
+					 * `@import`s and emits the utilities, so css-loader only sees the
+					 * finished CSS and the font URLs in it
+					 */
+					test: /\.css$/i,
 					use: [
 						MiniCssExtractPlugin.loader,
 						{
 							loader: 'css-loader',
 							options: {
-								sourceMap: isProduction ? false : true
+								sourceMap: isProduction ? false : true,
+								importLoaders: 1
 							}
-						},
-						{
-							loader: 'sass-loader'
 						},
 						{
 							loader: 'postcss-loader'

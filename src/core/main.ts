@@ -40,9 +40,7 @@ import {
 } from './types';
 
 /** Stylesheets */
-import '../css/root.scss';
-import '../css/fonts.scss';
-import '../css/main.scss';
+import '../css/index.css';
 
 /* References */
 const selector = data.instances.selector;
@@ -122,9 +120,15 @@ if(config.get('performance'))
 /**
  * Menu click event
  */
-eventHooks.listen(selector.use('TOP_EXTEND') as HTMLElement, 'click', 'sortClick', (e) =>
+eventHooks.listen(selector.use('TOP_EXTEND') as HTMLElement, 'click', 'sortClick', (e: MouseEvent) =>
 {
-	data.components.main.menu.toggle(e.currentTarget);
+	const opened = data.components.main.menu.toggle();
+
+	/* Opened from the keyboard (a click with no pointer detail): move into the menu */
+	if(opened && e.detail === 0)
+	{
+		data.components.main.menu.focusItem(0);
+	}
 });
 
 /**

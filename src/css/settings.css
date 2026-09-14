@@ -1,0 +1,84 @@
+/**
+ * The settings panel, styled as a shadcn dialog.
+ *
+ * The controls stay native `select` and checkbox elements, because
+ * `options.gather()` reads their values directly.
+ */
+
+@layer components {
+  body > div.focusOverlay {
+    @apply fixed inset-0 z-40 overflow-hidden bg-black/10 supports-backdrop-filter:backdrop-blur-xs;
+  }
+
+  body > div.settingsContainer {
+    @apply fixed top-1/2 left-1/2 z-50 grid w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-4 rounded-xl bg-popover p-4 text-sm text-popover-foreground shadow-lg ring-1 ring-foreground/10 sm:max-w-sm;
+
+    > .wrapper {
+      @apply grid max-h-[70vh] gap-5 overflow-y-auto;
+
+      > div.section {
+        @apply grid gap-3;
+
+        > div.header {
+          @apply text-base leading-none font-medium;
+        }
+
+        .option {
+          @apply flex min-h-8 items-center justify-between gap-4;
+
+          > div.option-text {
+            @apply text-sm text-muted-foreground select-none;
+          }
+
+          > div:last-child {
+            @apply shrink-0;
+          }
+
+          &.interactable {
+            @apply cursor-pointer;
+
+            input {
+              @apply cursor-pointer;
+            }
+          }
+        }
+      }
+    }
+
+    /* Apply and cancel, as the dialog footer */
+    > div.bottom {
+      @apply -mx-4 -mb-4 flex flex-row-reverse justify-start gap-2 rounded-b-xl border-t bg-muted/50 p-4;
+
+      > div {
+        @apply inline-flex h-8 cursor-pointer items-center justify-center rounded-lg border border-transparent px-2.5 text-sm font-medium whitespace-nowrap transition-colors select-none;
+
+        &.apply {
+          @apply bg-primary text-primary-foreground hover:bg-primary/80;
+        }
+
+        &.cancel {
+          @apply border-border bg-background hover:bg-muted dark:border-input dark:bg-input/30 dark:hover:bg-input/50;
+        }
+      }
+    }
+
+    select {
+      @apply h-8 w-44 min-w-0 cursor-pointer appearance-none rounded-lg border border-input bg-transparent py-1 pr-8 pl-2.5 text-sm text-foreground transition-colors outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input/30;
+
+      background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="%2371717b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>');
+      background-position: right 0.5rem center;
+      background-repeat: no-repeat;
+      background-size: 1rem;
+
+      > option {
+        @apply bg-popover text-popover-foreground;
+      }
+    }
+
+    input[type="checkbox"] {
+      @apply size-4 rounded-sm;
+
+      accent-color: var(--primary);
+    }
+  }
+}

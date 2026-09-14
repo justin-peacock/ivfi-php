@@ -4,13 +4,10 @@ import { config } from '../../config/config';
 import { eventHooks } from '../../modules/event-hooks';
 import { log } from '../../modules/logger';
 /** Helpers */
-import { DOM, getReadableSize } from '../../helpers';
+import { DOM, getReadableSize, iconElement, dialogs } from '../../helpers';
 
 /** Types */
 import { TConfigUpload } from '../../types';
-
-/** Stylesheets */
-import '../../../css/upload.scss';
 
 /**
  * One queued file and the row that reports on it
@@ -136,13 +133,15 @@ class componentUpload
 				return;
 			}
 
-			cell.append(DOM.new('button', {
+			const button = DOM.new('button', {
 				class : 'deleteItem',
 				type : 'button',
-				text : '\u2715',
 				title : `Delete ${name}`,
 				'aria-label' : `Delete ${name}`
-			}));
+			});
+
+			button.append(iconElement('trash-2'));
+			cell.append(button);
 		});
 
 		eventHooks.listen(table as HTMLElement, 'click', 'uploadDeleteItem', (event: MouseEvent) =>
@@ -170,18 +169,23 @@ class componentUpload
 	 */
 	private deleteItem = (name: string, directory: boolean): void =>
 	{
-		const question = directory
-			? `Delete the folder "${name}"? Only an empty folder can be deleted. This cannot be undone.`
-			: `Delete "${name}"? This cannot be undone.`;
-
-		if(!window.confirm(question))
+		dialogs.confirm(directory ? `Delete the folder "${name}"?` : `Delete "${name}"?`, {
+			description: directory
+				? 'Only an empty folder can be deleted. This cannot be undone.'
+				: 'This cannot be undone.',
+			confirmLabel: 'Delete',
+			destructive: true
+		}).then((confirmed) =>
 		{
-			return;
-		}
+			if(!confirmed)
+			{
+				return;
+			}
 
-		this.post(this.settings.deleteAction, name, directory
-			? 'The folder could not be deleted.'
-			: 'The file could not be deleted.');
+			this.post(this.settings.deleteAction, name, directory
+				? 'The folder could not be deleted'
+				: 'The file could not be deleted');
+		});
 	};
 
 	/**
@@ -205,9 +209,10 @@ class componentUpload
 		const button = DOM.new('button', {
 			class : 'newFolder',
 			type : 'button',
-			text : '+ New folder'
+			text : 'New folder'
 		});
 
+		button.prepend(iconElement('folder-plus'));
 		path.before(button);
 
 		eventHooks.listen(button, 'click', 'uploadNewFolder', () => this.createDirectory());
@@ -360,6 +365,8 @@ class componentUpload
 			class : 'uploadDropInner',
 			text : 'Drop files to upload'
 		});
+
+		inner.prepend(iconElement('upload'));
 
 		this.overlay = DOM.new('div', {
 			class : 'uploadDrop'
@@ -586,22 +593,27 @@ class componentUpload
 			return;
 		}
 
-		const name = window.prompt('Name for the new folder');
-
-		/* Cancelled, rather than confirmed with nothing in it */
-		if(name === null)
+		dialogs.prompt('New folder', {
+			label: 'Folder name',
+			placeholder: 'Folder name',
+			confirmLabel: 'Create'
+		}).then((name) =>
 		{
-			return;
-		}
+			/* Cancelled, rather than confirmed with nothing in it */
+			if(name === null)
+			{
+				return;
+			}
 
-		if(name.trim() === '')
-		{
-			window.alert('A folder needs a name.');
+			if(name.trim() === '')
+			{
+				dialogs.alert('A folder needs a name');
 
-			return;
-		}
+				return;
+			}
 
-		this.post(this.settings.directoryAction, name, 'The folder could not be created.');
+			this.post(this.settings.directoryAction, name, 'The folder could not be created');
+		});
 	};
 
 	/**
@@ -639,7 +651,7 @@ class componentUpload
 				return;
 			}
 
-			window.alert(payload && payload.error ? payload.error : failure);
+			dialogs.alert(failure, payload && payload.error ? payload.error : undefined);
 		}).catch((error) =>
 		{
 			log('upload', error);
@@ -648,7 +660,7 @@ class componentUpload
 			 * Anything but the JSON this endpoint answers with means the request
 			 * never reached it, a session that expired being the likeliest
 			 */
-			window.alert(`${failure} Reload the page and try again.`);
+			dialogs.alert(failure, 'Reload the page and try again.');
 		});
 	};
 
@@ -673,7 +685,7 @@ class componentUpload
 			'aria-label' : 'Close the upload queue'
 		});
 
-		close.innerHTML = '&#10005;';
+		close.append(iconElement('x'));
 
 		this.close = close;
 
@@ -729,18 +741,25 @@ class componentUpload
 		 */
 		if(this.busy || this.queue.length > 0)
 		{
-			if(!window.confirm('Uploads are still running. Stop them?'))
+			dialogs.confirm('Stop uploading?', {
+				description: 'Uploads are still running. Anything not yet sent will be skipped.',
+				confirmLabel: 'Stop uploads',
+				destructive: true
+			}).then((confirmed) =>
 			{
-				return;
-			}
+				if(!confirmed)
+				{
+					return;
+				}
 
-			this.queue = [];
+				this.queue = [];
 
-			if(this.request)
-			{
-				/* Settles the current row and drains what is left of the queue */
-				this.request.abort();
-			}
+				if(this.request)
+				{
+					/* Settles the current row and drains what is left of the queue */
+					this.request.abort();
+				}
+			});
 
 			return;
 		}

@@ -190,6 +190,16 @@ export class componentBind
 	{
 		eventHooks.listen(window, 'keydown', 'mainKeyDown', (event: KeyboardEvent) =>
 		{
+			/**
+			 * An open dialog owns the keyboard. Escape has to reach it to cancel,
+			 * which `overlay.hide()` would prevent, and a folder name typed into a
+			 * prompt must not open the gallery on every `g`
+			 */
+			if(document.querySelector('dialog.ivfiDialog[open]'))
+			{
+				return;
+			}
+
 			/* Show filter */
 			if(event.shiftKey && event.code === Keys.f)
 			{

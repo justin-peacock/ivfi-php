@@ -142,6 +142,8 @@ export namespace MComponentMain
 		toggle?: (
 			state?: null | boolean
 		) => boolean;
+		items?: () => Array<HTMLElement>;
+		focusItem?: (index: number) => void;
 	};
 
 	type TDates = {

@@ -216,8 +216,8 @@ try
 
 			/** Find used fonts in stylesheet */
 			const usedFonts = stylesheetData.match(
-				new RegExp(/(src\:\ ?url\(([A-Za-z0-9\.\/\-]+)\) format\("[A-Za-z0-9]+"\)\;)/g)
-			);
+				new RegExp(/(src\:\ ?url\(["']?([A-Za-z0-9\.\/\-]+)["']?\) format\(["'][A-Za-z0-9\-]+["']\)\;)/g)
+			) || [];
 
 			console.log('Found', usedFonts.length, 'font asset(s)');
 
@@ -225,7 +225,7 @@ try
 			for(const fontEntry of usedFonts)
 			{
 				/* Join asset path */
-				const fontPath = path.join('./build', (fontEntry.split('url(')[1]).split(')')[0]);
+				const fontPath = path.join('./build', (fontEntry.split('url(')[1]).split(')')[0].replace(/["']/g, ''));
 
 				if(fs.existsSync(fontPath))
 				{
@@ -242,11 +242,23 @@ try
 				}
 			}
 
+			/**
+			 * A nowdoc rather than a quoted string, so the stylesheet goes in
+			 * byte for byte. Escaping quotes for a single-quoted string breaks
+			 * on any backslash before one, which Tailwind's escaped selectors
+			 * produce, and turns the file into a parse error. Only the build
+			 * banner was stripped above, so Tailwind's license notice stays
+			 */
+			const css = stylesheetData;
+
+			if(/^IVFICSS\b/m.test(css))
+			{
+				onError('The stylesheet contains a line that would end the nowdoc early');
+			}
+
 			lines.splice(
 				Math.min(...splicedStyles.indexes), 0,
-				`$baseStylesheet = '<style type="text/css">${
-						stripComments(stylesheetData).replace(/[\']/g, `${String.fromCharCode(92)}\'`)
-				}</style>';`
+				`$baseStylesheet = <<<'IVFICSS'\n<style type="text/css">${css}</style>\nIVFICSS;`
 			);
 		} else {
 			onError(`Stylesheet file: '${stylePath}' does not exist!`);

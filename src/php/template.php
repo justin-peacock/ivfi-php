@@ -322,6 +322,46 @@ class Helpers
   }
 
   /**
+   * The markup of a bundled icon
+   *
+   * Lucide icons (https://lucide.dev), ISC License, Copyright (c) 2026 Lucide
+   * Icons and Contributors. The same shapes as `helpers/icons.ts` on the
+   * client. Only fixed markup is returned, so it is safe to emit raw.
+   *
+   * Hidden from assistive technology and from the pointer: the element it sits
+   * in carries the meaning, and the client's click handlers compare
+   * `event.target` against the elements they bound
+   *
+   * @param String  $name  Icon name
+   *
+   * @return String  An empty string for an unknown name
+   */
+  public static function icon($name)
+  {
+    static $shapes = [
+    'menu' => '<path d="M4 5h16"/><path d="M4 12h16"/><path d="M4 19h16"/>',
+    'folder' => '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>',
+    'file' => '<path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"/><path d="M14 2v5a1 1 0 0 0 1 1h5"/>',
+    'file-image' => '<path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"/><path d="M14 2v5a1 1 0 0 0 1 1h5"/><circle cx="10" cy="12" r="2"/><path d="m20 17-1.296-1.296a2.41 2.41 0 0 0-3.408 0L9 22"/>',
+    'file-video' => '<path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"/><path d="M14 2v5a1 1 0 0 0 1 1h5"/><path d="M15.033 13.44a.647.647 0 0 1 0 1.12l-4.065 2.352a.645.645 0 0 1-.968-.56v-4.704a.645.645 0 0 1 .967-.56z"/>',
+    'corner-left-up' => '<path d="M14 9 9 4 4 9"/><path d="M20 20h-7a4 4 0 0 1-4-4V4"/>',
+    'download' => '<path d="M12 15V3"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/>',
+    'log-out' => '<path d="m16 17 5-5-5-5"/><path d="M21 12H9"/><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>',
+    ];
+
+    if(!isset($shapes[$name]))
+    {
+      return '';
+    }
+
+    return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"'
+      . ' stroke="currentColor" stroke-width="2" stroke-linecap="round"'
+      . ' stroke-linejoin="round" aria-hidden="true" class="icon icon-' . $name . '">'
+      . $shapes[$name]
+      . '</svg>';
+  }
+
+  /**
    * Creates a stringed HTML element
    *
    * Attribute values are always encoded, and attribute names that could
@@ -1022,33 +1062,74 @@ function authRenderLogin($error = '', $status = 401)
     <meta name="robots" content="noindex, nofollow">
     <title>Sign in</title>
     <style>
-      :root { color-scheme: dark; }
+      /*
+       * The shadcn tokens from the main stylesheet, repeated here because this
+       * page deliberately loads nothing external. Light, or dark when the
+       * system asks for it
+       */
+      :root {
+        color-scheme: light dark;
+        --background: oklch(1 0 0);
+        --foreground: oklch(0.141 0.005 285.823);
+        --card: oklch(1 0 0);
+        --muted-foreground: oklch(0.552 0.016 285.938);
+        --primary: oklch(0.841 0.238 128.85);
+        --primary-foreground: oklch(0.405 0.101 131.063);
+        --destructive: oklch(0.577 0.245 27.325);
+        --input: oklch(0.92 0.004 286.32);
+        --ring: oklch(0.705 0.015 286.067);
+        --ring-edge: oklch(0.141 0.005 285.823 / 10%);
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --background: oklch(0.141 0.005 285.823);
+          --foreground: oklch(0.985 0 0);
+          --card: oklch(0.21 0.006 285.885);
+          --muted-foreground: oklch(0.705 0.015 286.067);
+          --primary: oklch(0.768 0.233 130.85);
+          --destructive: oklch(0.704 0.191 22.216);
+          --input: oklch(1 0 0 / 15%);
+          --ring: oklch(0.552 0.016 285.938);
+          --ring-edge: oklch(0.985 0 0 / 10%);
+        }
+      }
+      *, *::before, *::after { box-sizing: border-box; }
       body {
-        margin: 0; min-height: 100vh; display: flex;
+        margin: 0; min-height: 100vh; display: flex; padding: 16px;
         align-items: center; justify-content: center;
-        background: #1a1c20; color: #d8dade;
-        font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        background: var(--background); color: var(--foreground);
+        font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        -webkit-font-smoothing: antialiased;
       }
       form {
-        width: 100%; max-width: 320px; padding: 28px;
-        background: #23262b; border: 1px solid #32363d; border-radius: 4px;
-        display: flex; flex-direction: column; gap: 14px;
+        width: 100%; max-width: 360px; padding: 24px;
+        background: var(--card); border-radius: 14px;
+        box-shadow: 0 0 0 1px var(--ring-edge), 0 1px 2px rgb(0 0 0 / 5%);
+        display: flex; flex-direction: column; gap: 16px;
       }
-      h1 { margin: 0 0 4px; font-size: 17px; font-weight: 600; }
-      label { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: #9aa0a8; }
+      h1 { margin: 0; font-size: 16px; font-weight: 500; line-height: 1.25; }
+      label { display: flex; flex-direction: column; gap: 6px; font-size: 14px; font-weight: 500; }
       input[type=text], input[type=password] {
-        padding: 9px 10px; font-size: 14px; color: #e8eaed;
-        background: #1a1c20; border: 1px solid #3a3f47; border-radius: 3px;
+        height: 36px; width: 100%; padding: 4px 10px; font: inherit; font-weight: 400;
+        color: var(--foreground); background: transparent;
+        border: 1px solid var(--input); border-radius: 10px; outline: none;
+        transition: border-color .15s, box-shadow .15s;
       }
-      input:focus-visible { outline: 2px solid #5b8dd6; outline-offset: 1px; }
+      input[type=text]:focus-visible, input[type=password]:focus-visible {
+        border-color: var(--ring);
+        box-shadow: 0 0 0 3px color-mix(in oklch, var(--ring) 50%, transparent);
+      }
       button {
-        padding: 9px 10px; font-size: 14px; font-weight: 500; cursor: pointer;
-        color: #fff; background: #3f6ba8; border: 0; border-radius: 3px;
+        height: 36px; padding: 0 12px; font: inherit; font-weight: 500; cursor: pointer;
+        color: var(--primary-foreground); background: var(--primary);
+        border: 0; border-radius: 10px; transition: background-color .15s;
       }
-      button:hover { background: #4a7aba; }
+      button:hover { background: color-mix(in oklch, var(--primary) 80%, transparent); }
+      button:focus-visible { outline: none; box-shadow: 0 0 0 3px color-mix(in oklch, var(--ring) 50%, transparent); }
       .error {
-        margin: 0; padding: 8px 10px; font-size: 13px;
-        color: #f0b3ad; background: #3a2320; border: 1px solid #5c332e; border-radius: 3px;
+        margin: 0; padding: 8px 12px; font-size: 13px; border-radius: 10px;
+        color: var(--destructive);
+        background: color-mix(in oklch, var(--destructive) 10%, transparent);
       }
     </style>
   </head>
@@ -2989,11 +3070,16 @@ class Indexer extends Helpers
         $anchorAttributes['class'] = 'preview';
       }
 
+      /** Icon for the kind of file, ahead of its escaped name */
+      $fileIcon = parent::icon(
+        $fileType[0] === 'image' ? 'file-image' : ($fileType[0] === 'video' ? 'file-video' : 'file')
+      );
+
       /** Create file name column */
       $tdFileName = parent::createElement('td', [
         'data-raw' => $fileName
       ], parent::createElement(
-        'a', $anchorAttributes, $fileName
+        'a', $anchorAttributes, $fileIcon . parent::escape($fileName), true
       ), true);
 
       /** Create modified column */
@@ -3010,19 +3096,14 @@ class Indexer extends Helpers
         'data-raw' => $fileSize[0] === -1 ? 0 : $fileSize[0]
       ], $fileSize[1]);
 
-      /** Create save anchor */
+      /** Create save anchor, an icon labelled for assistive technology */
       $anchorSave = parent::createElement('a', [
         'href' => $fileUrl,
         'filename' => $fileName,
-        'download' => ''
-      ], implode('', [
-        parent::createElement(
-          'span', ['data-view' => 'desktop'], '[Download]'
-        ),
-        parent::createElement(
-          'span', ['data-view' => 'mobile'], '[Save]'
-        )
-      ]), true);
+        'download' => '',
+        'title' => 'Download',
+        'aria-label' => 'Download ' . $fileName
+      ], parent::icon('download'), true);
 
       /** Create save column */
       $tdSave = parent::createElement('td', [
@@ -3088,7 +3169,7 @@ class Indexer extends Helpers
       ], parent::createElement(
         'a', [
           'href' => $url
-        ], '[' . $dir[1] . ']'
+        ], parent::icon('folder') . parent::escape($dir[1]), true
       ), true);
 
       /** Create modified column */
@@ -3196,7 +3277,7 @@ class Indexer extends Helpers
     ], implode('', array_merge([
       parent::createElement('td', [], parent::createElement('a', [
           'href' => $parentHref
-        ], '[Parent Directory]'), true)
+        ], parent::icon('corner-left-up') . 'Parent directory', true), true)
       ],
       array_fill(0, 3, parent::createElement('td', [], parent::createElement(
         'span', [], '-'
@@ -4668,7 +4749,7 @@ $jsConfig = constructJsConfig(
   <body class="rootDirectory<?=$compact ? ' compact' : ''?><?=!$footer['enabled'] ? ' pb' : ''?>" is-loading<?=$config['performance'] ? ' optimize' : '';?> root>
     <?=$getInjectable('body');?>
     <div class="topBar">
-        <div class="extend">&#9881;</div>
+        <button type="button" class="extend" title="Menu" aria-label="Menu" aria-haspopup="menu" aria-expanded="false"><?=Helpers::icon('menu');?></button>
         <div class="directoryInfo">
           <div data-count="size"><?=$data['size']['readable'];?></div>
           <?=generateCountDiv(
@@ -4721,7 +4802,7 @@ $jsConfig = constructJsConfig(
     ) : '';?>
 
     <div class="filterContainer" style="display: none;">
-        <input type="text" placeholder="Search .." value="">
+        <input type="text" placeholder="Filter this directory" aria-label="Filter this directory" value="">
     </div>
 
     <!-- [https://git.five.sh/ivfi/ — The image and video friendly indexer]  -->  
