@@ -220,6 +220,25 @@
           @apply text-muted-foreground;
         }
 
+        /* File icons in the color of their kind, from the `--file-*` tokens */
+        &.file[data-kind] > td:first-child > a > svg.icon {
+          color: var(--file-kind);
+        }
+
+        &[data-kind="image"] { --file-kind: var(--file-image); }
+        &[data-kind="video"] { --file-kind: var(--file-video); }
+        &[data-kind="audio"] { --file-kind: var(--file-audio); }
+        &[data-kind="pdf"] { --file-kind: var(--file-pdf); }
+        &[data-kind="document"] { --file-kind: var(--file-document); }
+        &[data-kind="spreadsheet"] { --file-kind: var(--file-spreadsheet); }
+        &[data-kind="presentation"] { --file-kind: var(--file-presentation); }
+        &[data-kind="archive"] { --file-kind: var(--file-archive); }
+        &[data-kind="package"] { --file-kind: var(--file-package); }
+        &[data-kind="code"] { --file-kind: var(--file-code); }
+        &[data-kind="data"] { --file-kind: var(--file-data); }
+        &[data-kind="font"] { --file-kind: var(--file-font); }
+        &[data-kind="key"] { --file-kind: var(--file-key); }
+
         /* Download control */
         > td.download > a {
           @apply inline-flex size-7 items-center justify-center rounded-md text-muted-foreground no-underline transition-colors hover:bg-muted hover:text-foreground;

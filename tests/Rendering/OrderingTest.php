@@ -43,7 +43,7 @@ final class OrderingTest extends IndexerTestCase
     private function names(string $rows, string $type): array
     {
         preg_match_all(
-            sprintf('#<tr class="%s"><td data-raw="([^"]*)"><a #', preg_quote($type, '#')),
+            sprintf('#<tr class="%s"(?: data-kind="[a-z]+")?><td data-raw="([^"]*)"><a #', preg_quote($type, '#')),
             $rows,
             $m
         );

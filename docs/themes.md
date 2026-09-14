@@ -30,6 +30,8 @@ The simplest theme redefines the tokens. It loads after the base stylesheet, so 
 
 The page follows the visitor's light or dark system setting. The available tokens are listed at the top of `src/css/theme.css`: `--background`, `--foreground`, `--card`, `--popover`, `--primary`, `--secondary`, `--muted`, `--accent`, `--destructive`, `--border`, `--input`, `--ring` and `--radius`, most with a matching `-foreground`. Two layout values, `--topbar-height` and `--row-height`, can be changed too.
 
+File icons are colored by kind with `--file-image`, `--file-video`, `--file-audio`, `--file-pdf`, `--file-document`, `--file-spreadsheet`, `--file-presentation`, `--file-archive`, `--file-package`, `--file-code`, `--file-data`, `--file-font` and `--file-key`. Each file row carries its kind as `data-kind`, so a theme can also target a kind directly, for example `tr[data-kind="pdf"]`. Files of no known kind have no `data-kind` and keep the muted icon.
+
 ## Usage
 * 1) Download or create the themes that you wish to use.
 * 2) Place them in a publicly available directory.

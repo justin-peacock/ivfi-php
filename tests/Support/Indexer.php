@@ -188,7 +188,7 @@ final class Response
      */
     public function rows(): string
     {
-        preg_match_all('#<tr class="(?:file|directory|parent)">.*?</tr>#s', $this->body, $m);
+        preg_match_all('#<tr class="(?:file|directory|parent)"(?: data-kind="[a-z]+")?>.*?</tr>#s', $this->body, $m);
 
         return implode("\n", $m[0]);
     }

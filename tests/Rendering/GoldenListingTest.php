@@ -93,7 +93,7 @@ final class GoldenListingTest extends IndexerTestCase
      */
     private function orderRows(string $html): string
     {
-        preg_match_all('#<tr class="(?:file|directory|parent)">.*?</tr>#s', $html, $m);
+        preg_match_all('#<tr class="(?:file|directory|parent)"(?: data-kind="[a-z]+")?>.*?</tr>#s', $html, $m);
 
         if ($m[0] === []) {
             return $html;
@@ -105,7 +105,7 @@ final class GoldenListingTest extends IndexerTestCase
         $index = 0;
 
         return preg_replace_callback(
-            '#<tr class="(?:file|directory|parent)">.*?</tr>#s',
+            '#<tr class="(?:file|directory|parent)"(?: data-kind="[a-z]+")?>.*?</tr>#s',
             static function () use ($rows, &$index): string {
                 return $rows[$index++];
             },

@@ -326,7 +326,8 @@ class Helpers
    *
    * Lucide icons (https://lucide.dev), ISC License, Copyright (c) 2026 Lucide
    * Icons and Contributors. The same shapes as `helpers/icons.ts` on the
-   * client. Only fixed markup is returned, so it is safe to emit raw.
+   * client, except the file-kind icons, which only the listing rows here use.
+   * Only fixed markup is returned, so it is safe to emit raw.
    *
    * Hidden from assistive technology and from the pointer: the element it sits
    * in carries the meaning, and the client's click handlers compare
@@ -344,6 +345,16 @@ class Helpers
     'file' => '<path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"/><path d="M14 2v5a1 1 0 0 0 1 1h5"/>',
     'file-image' => '<path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"/><path d="M14 2v5a1 1 0 0 0 1 1h5"/><circle cx="10" cy="12" r="2"/><path d="m20 17-1.296-1.296a2.41 2.41 0 0 0-3.408 0L9 22"/>',
     'file-video' => '<path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"/><path d="M14 2v5a1 1 0 0 0 1 1h5"/><path d="M15.033 13.44a.647.647 0 0 1 0 1.12l-4.065 2.352a.645.645 0 0 1-.968-.56v-4.704a.645.645 0 0 1 .967-.56z"/>',
+    'file-music' => '<path d="M11.65 22H18a2 2 0 0 0 2-2V8a2.4 2.4 0 0 0-.706-1.706l-3.588-3.588A2.4 2.4 0 0 0 14 2H6a2 2 0 0 0-2 2v10.35"/><path d="M14 2v5a1 1 0 0 0 1 1h5"/><path d="M8 20v-7l3 1.474"/><circle cx="6" cy="20" r="2"/>',
+    'file-text' => '<path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"/><path d="M14 2v5a1 1 0 0 0 1 1h5"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/>',
+    'file-spreadsheet' => '<path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"/><path d="M14 2v5a1 1 0 0 0 1 1h5"/><path d="M8 13h2"/><path d="M14 13h2"/><path d="M8 17h2"/><path d="M14 17h2"/>',
+    'file-chart-column' => '<path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"/><path d="M14 2v5a1 1 0 0 0 1 1h5"/><path d="M8 18v-1"/><path d="M12 18v-6"/><path d="M16 18v-3"/>',
+    'file-archive' => '<path d="M13.659 22H18a2 2 0 0 0 2-2V8a2.4 2.4 0 0 0-.706-1.706l-3.588-3.588A2.4 2.4 0 0 0 14 2H6a2 2 0 0 0-2 2v11.5"/><path d="M14 2v5a1 1 0 0 0 1 1h5"/><path d="M8 12v-1"/><path d="M8 18v-2"/><path d="M8 7V6"/><circle cx="8" cy="20" r="2"/>',
+    'file-box' => '<path d="M14 2v5a1 1 0 0 0 1 1h5"/><path d="M14.692 22H18a2 2 0 0 0 2-2V8a2.4 2.4 0 0 0-.706-1.706l-3.588-3.588A2.4 2.4 0 0 0 14 2H6a2 2 0 0 0-2 2v3.804"/><path d="M2.264 13.752 7 16.5l4.737-2.748"/><path d="M2.995 13.014A2 2 0 0 0 2 14.744v3.516a2 2 0 0 0 .996 1.73l3 1.74a2 2 0 0 0 2.008 0l3-1.74A2 2 0 0 0 12 18.26v-3.517a2 2 0 0 0-.995-1.73l-3-1.742a2 2 0 0 0-1.892-.064z"/><path d="M7 16.5V22"/>',
+    'file-code' => '<path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"/><path d="M14 2v5a1 1 0 0 0 1 1h5"/><path d="M10 12.5 8 15l2 2.5"/><path d="m14 12.5 2 2.5-2 2.5"/>',
+    'file-braces' => '<path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"/><path d="M14 2v5a1 1 0 0 0 1 1h5"/><path d="M10 12a1 1 0 0 0-1 1v1a1 1 0 0 1-1 1 1 1 0 0 1 1 1v1a1 1 0 0 0 1 1"/><path d="M14 18a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1 1 1 0 0 1-1-1v-1a1 1 0 0 0-1-1"/>',
+    'file-type' => '<path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"/><path d="M14 2v5a1 1 0 0 0 1 1h5"/><path d="M11 18h2"/><path d="M12 12v6"/><path d="M9 13v-.5a.5.5 0 0 1 .5-.5h5a.5.5 0 0 1 .5.5v.5"/>',
+    'file-key' => '<path d="M14 2v5a1 1 0 0 0 1 1h5"/><path d="M4 12v6"/><path d="M4 14h2"/><path d="M9.65 22H18a2 2 0 0 0 2-2V8a2.4 2.4 0 0 0-.706-1.706l-3.588-3.588A2.4 2.4 0 0 0 14 2H6a2 2 0 0 0-2 2v4"/><circle cx="4" cy="20" r="2"/>',
     'corner-left-up' => '<path d="M14 9 9 4 4 9"/><path d="M20 20h-7a4 4 0 0 1-4-4V4"/>',
     'download' => '<path d="M12 15V3"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/>',
     'log-out' => '<path d="m16 17 5-5-5-5"/><path d="M21 12H9"/><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>',
@@ -3071,9 +3082,8 @@ class Indexer extends Helpers
       }
 
       /** Icon for the kind of file, ahead of its escaped name */
-      $fileIcon = parent::icon(
-        $fileType[0] === 'image' ? 'file-image' : ($fileType[0] === 'video' ? 'file-video' : 'file')
-      );
+      $fileKind = self::getFileKind($fileType[0], $fileType[1]);
+      $fileIcon = parent::icon(self::FILE_KINDS[$fileKind]['icon'] ?? 'file');
 
       /** Create file name column */
       $tdFileName = parent::createElement('td', [
@@ -3111,10 +3121,15 @@ class Indexer extends Helpers
         'class' => 'download'
       ], $anchorSave, true);
 
-      /** Create container and add to rows */
-      $rows[] = parent::createElement('tr', [
-        'class' => 'file'
-      ], implode('', [
+      /** Create container and add to rows, tagged with its kind for styling */
+      $rowAttributes = ['class' => 'file'];
+
+      if($fileKind !== 'other')
+      {
+        $rowAttributes['data-kind'] = $fileKind;
+      }
+
+      $rows[] = parent::createElement('tr', $rowAttributes, implode('', [
         $tdFileName,
         $tdModified,
         $tdSize,
@@ -3499,6 +3514,92 @@ class Indexer extends Helpers
       ? $this->types[$extension]
       : 'other', $extension
     ];
+  }
+
+  /**
+   * Kinds of file the listing gives their own icon and color, see the
+   * `--file-*` tokens in `theme.css`. Image and video also come from the
+   * `extensions` option, which decides what previews; these lists only add
+   * icons for formats the browser cannot preview.
+   */
+  private const FILE_KINDS = [
+    'image' => ['icon' => 'file-image', 'extensions' => [
+      'tif', 'tiff', 'heic', 'heif', 'avif', 'jxl', 'psd', 'ai', 'eps', 'raw',
+      'dng', 'cr2', 'cr3', 'nef', 'arw', 'orf', 'raf', 'xcf'
+    ]],
+    'video' => ['icon' => 'file-video', 'extensions' => [
+      'mkv', 'avi', 'mov', 'wmv', 'flv', 'm4v', 'mpg', 'mpeg', '3gp', 'm2ts'
+    ]],
+    'audio' => ['icon' => 'file-music', 'extensions' => [
+      'mp3', 'wav', 'flac', 'aac', 'm4a', 'oga', 'opus', 'wma', 'aif', 'aiff',
+      'alac', 'mid', 'midi'
+    ]],
+    'pdf' => ['icon' => 'file-text', 'extensions' => ['pdf']],
+    'document' => ['icon' => 'file-text', 'extensions' => [
+      'txt', 'md', 'markdown', 'rst', 'rtf', 'doc', 'docx', 'odt', 'pages',
+      'tex', 'epub', 'log', 'nfo'
+    ]],
+    'spreadsheet' => ['icon' => 'file-spreadsheet', 'extensions' => [
+      'csv', 'tsv', 'xls', 'xlsx', 'xlsm', 'ods', 'numbers'
+    ]],
+    'presentation' => ['icon' => 'file-chart-column', 'extensions' => [
+      'ppt', 'pptx', 'odp'
+    ]],
+    'archive' => ['icon' => 'file-archive', 'extensions' => [
+      'zip', 'rar', '7z', 'tar', 'gz', 'tgz', 'bz2', 'xz', 'zst', 'lz', 'lzma', 'cab'
+    ]],
+    'package' => ['icon' => 'file-box', 'extensions' => [
+      'exe', 'msi', 'dmg', 'pkg', 'deb', 'rpm', 'apk', 'appimage', 'iso', 'img', 'jar'
+    ]],
+    'code' => ['icon' => 'file-code', 'extensions' => [
+      'js', 'mjs', 'cjs', 'jsx', 'ts', 'tsx', 'php', 'py', 'rb', 'go', 'rs', 'c', 'h',
+      'cc', 'cpp', 'hpp', 'cs', 'java', 'kt', 'swift', 'dart', 'scala', 'lua',
+      'pl', 'r', 'ex', 'exs', 'hs', 'zig', 'sql', 'html', 'htm', 'css', 'scss',
+      'sass', 'less', 'vue', 'svelte', 'sh', 'bash', 'zsh', 'fish', 'ps1', 'bat', 'cmd'
+    ]],
+    'data' => ['icon' => 'file-braces', 'extensions' => [
+      'json', 'jsonc', 'json5', 'ndjson', 'yaml', 'yml', 'xml', 'toml', 'ini',
+      'conf', 'cfg', 'env', 'plist'
+    ]],
+    'font' => ['icon' => 'file-type', 'extensions' => [
+      'ttf', 'otf', 'woff', 'woff2', 'eot'
+    ]],
+    'key' => ['icon' => 'file-key', 'extensions' => [
+      'pem', 'crt', 'cer', 'der', 'key', 'pub', 'csr', 'p12', 'pfx', 'asc', 'gpg', 'sig', 'kdbx'
+    ]]
+  ];
+
+  /**
+   * Identifies the kind of file, for its icon and color
+   *
+   * @param String    $type         Media type from `getFileType()`
+   * @param String    $extension    Lowercased extension
+   *
+   * @return String  A key of `FILE_KINDS`, or `other`
+   */
+  private static function getFileKind($type, $extension)
+  {
+    static $byExtension = null;
+
+    if($type === 'image' || $type === 'video')
+    {
+      return $type;
+    }
+
+    if($byExtension === null)
+    {
+      $byExtension = [];
+
+      foreach(self::FILE_KINDS as $kind => $definition)
+      {
+        foreach($definition['extensions'] as $known)
+        {
+          $byExtension[$known] = $kind;
+        }
+      }
+    }
+
+    return $byExtension[$extension] ?? 'other';
   }
 
   /**
