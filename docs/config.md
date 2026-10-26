@@ -517,7 +517,6 @@ Shows a footer with some general information at the bottom of the page.
 | `path_checking` | String | `strict` | Use `weak` if you need to support symbolic link directories. `strict` will use [realpath](https://www.php.net/manual/en/function.realpath.php) when verifiying the location of the current directory, whereas `weak` will use a similar string-based approach which doesn't resolve symbolic links.
 | `performance` | Bool | `false` | Enables [performance mode](performance.md). `true` will enable it for all folders, while setting it to a number, will enable it on directories above or equal to that respective amount of files.
 | `footer` | Bool | `true` | Setting this to `true` or `false` will enable or disable the path, site and generation time in the footer respectively.
-| `credits` | Bool | `true` | When set to true, it will display a simple link to the git repository in the footer along with the version number. I would appreciate it if you keep this enabled, but i also understand that it is not always desirable, so the option to hide it is there.
 | `trust_prepend_header` | Bool | `false` | Whether the `X-Indexer-Prepend-Path` request header is honoured. See [Path Prepending](#path-prepending). Only enable this when a reverse proxy sets the header and strips any copy sent by the client.
 | `debug` | Bool | `false` | Enables PHP debugging and `console.log()` info messages. Keep this disabled in production: it sends exception traces, which contain absolute filesystem paths, to the browser.
 
