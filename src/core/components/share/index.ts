@@ -76,6 +76,28 @@ class componentShare
 	}
 
 	/**
+	 * A configured lifetime in words, for the option that names it
+	 */
+	private describeSeconds = (seconds: number): string =>
+	{
+		const units: Array<[string, number]> = [
+			['day', 86400], ['hour', 3600], ['minute', 60]
+		];
+
+		for(const [name, size] of units)
+		{
+			if(seconds >= size)
+			{
+				const count = Math.round(seconds / size);
+
+				return `${count} ${name}${count === 1 ? '' : 's'}`;
+			}
+		}
+
+		return `${seconds} seconds`;
+	};
+
+	/**
 	 * Whether the menu should offer this at all
 	 */
 	public available = (): boolean =>
@@ -93,12 +115,14 @@ class componentShare
 	 */
 	private linkFor = (share: TConfigShareEntry): string =>
 	{
-		const path = share.path.split('/').map((segment) =>
-		{
-			return encodeURIComponent(segment);
-		}).join('/');
-
-		return `${window.location.origin}${path}`
+		/**
+		 * `url` is the server's own public form of the path: encoded, and
+		 * carrying the prepend where the script is reached through a proxy
+		 * mount, so the link lands on the same route the listing's own links
+		 * use. Only the origin comes from here, so the document never has to
+		 * trust the `Host` header to say where it is
+		 */
+		return `${window.location.origin}${share.url}`
 			+ `?${this.settings.param}=${encodeURIComponent(share.token)}`;
 	};
 
@@ -188,7 +212,8 @@ class componentShare
 			class : 'bottom'
 		});
 
-		const done = DOM.new('div', {
+		const done = DOM.new('button', {
+			type : 'button',
 			class : 'cancel ns',
 			text : 'Done'
 		});
@@ -247,7 +272,21 @@ class componentShare
 			id : 'shareExpiry'
 		}) as HTMLSelectElement;
 
-		LIFETIMES.forEach((lifetime) =>
+		const configured = this.settings.expiry || 0;
+
+		/**
+		 * A configured default that is not one of the presets would otherwise
+		 * leave the list on `Never`, and creating a link would post 0 and
+		 * quietly override the server's own default
+		 */
+		const lifetimes = LIFETIMES.some((item) => item.seconds === configured)
+			? LIFETIMES
+			: LIFETIMES.concat([{
+				label: `After ${this.describeSeconds(configured)}`,
+				seconds: configured
+			}]).sort((a, b) => a.seconds - b.seconds);
+
+		lifetimes.forEach((lifetime) =>
 		{
 			const option = DOM.new('option', {
 				value : `${lifetime.seconds}`,
@@ -255,7 +294,7 @@ class componentShare
 			}) as HTMLOptionElement;
 
 			/* The configured default, so the usual choice is already made */
-			if(lifetime.seconds === (this.settings.expiry || 0))
+			if(lifetime.seconds === configured)
 			{
 				option.selected = true;
 			}
@@ -263,7 +302,8 @@ class componentShare
 			select.append(option);
 		});
 
-		const button = DOM.new('div', {
+		const button = DOM.new('button', {
+			type : 'button',
 			class : 'create ns',
 			text : 'Create link'
 		});
@@ -359,22 +399,20 @@ class componentShare
 			class : 'actions'
 		});
 
-		const copy = DOM.new('div', {
+		const copy = DOM.new('button', {
+			type : 'button',
 			class : 'copy ns',
 			title : 'Copy link',
-			'aria-label' : 'Copy link',
-			role : 'button',
-			tabindex : '0'
+			'aria-label' : 'Copy link'
 		});
 
 		copy.append(iconElement('copy'));
 
-		const revoke = DOM.new('div', {
+		const revoke = DOM.new('button', {
+			type : 'button',
 			class : 'revoke ns',
 			title : 'Revoke link',
-			'aria-label' : 'Revoke link',
-			role : 'button',
-			tabindex : '0'
+			'aria-label' : 'Revoke link'
 		});
 
 		revoke.append(iconElement('trash-2'));

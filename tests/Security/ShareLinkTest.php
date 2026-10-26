@@ -336,6 +336,243 @@ final class ShareLinkTest extends IndexerTestCase
     }
 
     /**
+     * The request path and the directory it names are not the same string.
+     *
+     * `CURRENT_URI` is decoded once and the Indexer decodes it again, so a
+     * doubly encoded traversal folds away for one and not the other; a `#` in
+     * a directory name decodes into something a reader of URIs truncates at;
+     * and a symbolic link makes a path inside the share resolve outside it.
+     * Each of these listed an unshared directory to a share viewer.
+     *
+     * @param string $uri   A request that escapes the shared directory
+     * @param string $entry Something only the escaped directory holds
+     */
+    #[\PHPUnit\Framework\Attributes\DataProvider('escapes')]
+    public function testAPathThatResolvesOutsideTheShareIsRefused(
+        string $uri,
+        string $entry
+    ): void {
+        $fixture = new Fixture('share-resolve');
+
+        $fixture->directory('holiday');
+        $fixture->file('holiday/beach.jpg');
+        $fixture->directory('private');
+        $fixture->file('private/payslip.pdf');
+
+        /* A sibling whose name only differs once the request is decoded */
+        $fixture->directory('holiday#private');
+        $fixture->file('holiday#private/hashleak.txt');
+
+        /* And a way back out of the share that no string comparison can see */
+        @symlink('..', $fixture->root() . '/holiday/up');
+
+        $fixture->config([
+            'authentication' => [
+                'users' => [self::USER => password_hash(self::PASS, PASSWORD_DEFAULT)],
+                'throttle_path' => $fixture->root(),
+            ],
+            'share' => [
+                'enabled' => true,
+                'path' => $fixture->root() . '/state',
+            ],
+        ]);
+
+        $server = new Server($fixture, []);
+        $this->servers[] = $server;
+
+        $token = $this->mint($server);
+
+        $this->follow($server, '/holiday/', $token);
+
+        $response = $server->request($uri);
+
+        $this->assertStringNotContainsString(
+            $entry,
+            $response->body,
+            "{$uri} was listed to a share of /holiday/"
+        );
+
+        $this->assertStringNotContainsString('<tr class="file"', $response->body);
+    }
+
+    /**
+     * @return array<string, array{string, string}>
+     */
+    public static function escapes(): array
+    {
+        return [
+            'doubly encoded traversal' => ['/holiday/%252e%252e/private/', 'payslip.pdf'],
+            'encoded hash in a name'   => ['/holiday%23private/', 'hashleak.txt'],
+            'symlink to the parent'    => ['/holiday/up/private/', 'payslip.pdf'],
+            'symlink to the root'      => ['/holiday/up/', 'holiday'],
+        ];
+    }
+
+    /**
+     * The cookie's `Path` is matched against the request target, which is
+     * encoded, so a share of a directory whose name needs encoding has to be
+     * scoped to the encoded form or the browser never sends it back.
+     */
+    public function testAShareOfANameNeedingEncodingWorks(): void
+    {
+        $fixture = new Fixture('share-encoding');
+
+        $fixture->directory('summer photos');
+        $fixture->file('summer photos/pic.jpg');
+
+        $fixture->config([
+            'authentication' => [
+                'users' => [self::USER => password_hash(self::PASS, PASSWORD_DEFAULT)],
+                'throttle_path' => $fixture->root(),
+            ],
+            'share' => [
+                'enabled' => true,
+                'path' => $fixture->root() . '/state',
+            ],
+        ]);
+
+        $server = new Server($fixture, []);
+        $this->servers[] = $server;
+
+        $this->signIn($server);
+
+        $response = $server->request('/summer%20photos/', [], [
+            'ivfi_share_action' => 'create',
+            'ivfi_csrf' => $this->pageToken($server, '/summer%20photos/'),
+        ]);
+
+        $payload = json_decode($response->body, true);
+
+        $this->assertTrue($payload['ok'] ?? false, $response->body);
+
+        /* The stored path stays decoded; the public one is what a browser uses */
+        $this->assertSame('/summer photos/', $payload['share']['path']);
+        $this->assertSame('/summer%20photos/', $payload['share']['url']);
+
+        $server->clearCookies();
+
+        $arrival = $server->request(
+            '/summer%20photos/?ivfi_share=' . $payload['share']['token']
+        );
+
+        $this->assertContains(
+            'path=/summer%20photos/',
+            $arrival->cookieAttributes('IVFISHARE'),
+            'the cookie was scoped to the decoded name, which is never sent back'
+        );
+
+        $this->assertStringContainsString(
+            'pic.jpg', $server->request('/summer%20photos/')->body
+        );
+    }
+
+    /**
+     * Behind a proxy mount the listing's own links carry the prepend, so the
+     * link handed to a recipient and the cookie scope have to as well.
+     */
+    public function testAShareLinkCarriesThePrependPath(): void
+    {
+        $fixture = new Fixture('share-prepend');
+
+        $fixture->directory('holiday');
+        $fixture->file('holiday/beach.jpg');
+
+        $fixture->config([
+            'authentication' => [
+                'users' => [self::USER => password_hash(self::PASS, PASSWORD_DEFAULT)],
+                'throttle_path' => $fixture->root(),
+            ],
+            'share' => [
+                'enabled' => true,
+                'path' => $fixture->root() . '/state',
+            ],
+            'trust_prepend_header' => true,
+        ]);
+
+        $server = new Server($fixture, []);
+        $this->servers[] = $server;
+
+        $header = ['X-Indexer-Prepend-Path' => '/file/upstream/'];
+
+        $login = $server->request('/', $header);
+
+        $server->request('/', $header, [
+            'ivfi_user' => self::USER,
+            'ivfi_pass' => self::PASS,
+            'ivfi_csrf' => $this->token($login),
+        ]);
+
+        $page = $server->request('/holiday/', $header);
+
+        preg_match('#"token":"([a-f0-9]+)"#', $page->body, $m);
+
+        $response = $server->request('/holiday/', $header, [
+            'ivfi_share_action' => 'create',
+            'ivfi_csrf' => $m[1] ?? '',
+        ]);
+
+        $payload = json_decode($response->body, true);
+
+        $this->assertTrue($payload['ok'] ?? false, $response->body);
+
+        /* Authorisation still compares the path the script is actually asked for */
+        $this->assertSame('/holiday/', $payload['share']['path']);
+
+        /* The recipient's link and cookie use the route the proxy publishes */
+        $this->assertSame('/file/upstream/holiday/', $payload['share']['url']);
+
+        $server->clearCookies();
+
+        $arrival = $server->request(
+            '/holiday/?ivfi_share=' . $payload['share']['token'], $header
+        );
+
+        $this->assertContains(
+            'path=/file/upstream/holiday/',
+            $arrival->cookieAttributes('IVFISHARE')
+        );
+    }
+
+    /**
+     * The deny file is what keeps the store from being served where the web
+     * server hands out dotfiles, so a directory the operator made in advance
+     * has to get one too.
+     */
+    public function testAPrecreatedStoreDirectoryIsStillProtected(): void
+    {
+        $fixture = new Fixture('share-precreated');
+
+        $fixture->directory('holiday');
+        $fixture->file('holiday/beach.jpg');
+
+        $state = $fixture->root() . '/state';
+
+        /* Made before anything is minted, the way an operator would */
+        mkdir($state, 0700, true);
+
+        $fixture->config([
+            'authentication' => [
+                'users' => [self::USER => password_hash(self::PASS, PASSWORD_DEFAULT)],
+                'throttle_path' => $fixture->root(),
+            ],
+            'share' => [
+                'enabled' => true,
+                'path' => $state,
+            ],
+        ]);
+
+        $server = new Server($fixture, []);
+        $this->servers[] = $server;
+
+        $this->mint($server);
+
+        $this->assertFileExists(
+            $state . '/.htaccess',
+            'a store directory that already existed was left unprotected'
+        );
+    }
+
+    /**
      * A share is granted without a session, so every write in the script,
      * which follows that, stays closed to it.
      */

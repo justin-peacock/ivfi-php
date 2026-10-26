@@ -83,6 +83,11 @@ export type TConfigShareEntry = {
 	token: string;
 	/** The directory it covers, slash wrapped */
 	path: string;
+	/**
+	 * The same directory as a recipient reaches it: percent encoded, and
+	 * carrying the prepend where the script sits behind a proxy mount
+	 */
+	url: string;
 	created: number;
 	/** Unix time it lapses at, where zero means it does not */
 	expires: number;

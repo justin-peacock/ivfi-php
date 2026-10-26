@@ -540,7 +540,13 @@ main.getTableItems = () =>
 
 		for(let i = 0; i < activeRows.length; i++)
 		{
-			if(i === 0) continue;
+			/**
+			 * The parent row carries no file, and is recognised by its class
+			 * rather than by being row zero: the top of a share has no parent
+			 * row, and skipping the first row regardless would drop a real
+			 * file from the gallery whenever the listing starts with one
+			 */
+			if(activeRows[i].classList.contains('parent')) continue;
 
 			const row: TOptimizeRowItem = activeRows[i],
 				anchor: HTMLElement = (row.children[0].children[0] as HTMLElement);

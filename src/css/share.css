@@ -60,7 +60,7 @@
           }
         }
 
-        > div.create {
+        > button.create {
           @apply inline-flex h-8 shrink-0 cursor-pointer items-center justify-center rounded-lg bg-primary px-2.5 text-sm font-medium whitespace-nowrap text-primary-foreground transition-colors select-none hover:bg-primary/80;
         }
       }
@@ -93,7 +93,7 @@
         > div.actions {
           @apply flex shrink-0 items-center gap-1;
 
-          > div {
+          > button {
             @apply inline-flex size-8 cursor-pointer items-center justify-center rounded-lg border border-transparent text-muted-foreground transition-colors select-none hover:bg-muted hover:text-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50;
 
             > svg.icon {
@@ -116,7 +116,7 @@
     > div.bottom {
       @apply -mx-4 -mb-4 flex flex-row-reverse justify-start gap-2 rounded-b-xl border-t bg-muted/50 p-4;
 
-      > div.cancel {
+      > button.cancel {
         @apply inline-flex h-8 cursor-pointer items-center justify-center rounded-lg border border-border bg-background px-2.5 text-sm font-medium whitespace-nowrap transition-colors select-none hover:bg-muted dark:border-input dark:bg-input/30 dark:hover:bg-input/50;
       }
     }
