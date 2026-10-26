@@ -769,8 +769,14 @@ define('SHARE_COOKIE_NAME', 'IVFISHARE');
  * which is the one thing certain to outlive a redeploy
  */
 define('SHARE_STATE_DIRECTORY', '.ivfi-state');
-/** Query parameter a share link arrives on */
-define('SHARE_PARAM', 'ivfi_share');
+/**
+ * Query parameter a share link arrives on.
+ *
+ * Unprefixed, unlike the form and upload field names below, because this one
+ * is the only one a person ever sees: it is in the link that gets sent to
+ * them. The rest travel in a request body and are named for the script
+ */
+define('SHARE_PARAM', 'share');
 /** Field names used by the share endpoint */
 define('SHARE_FIELD_ACTION', 'ivfi_share_action');
 define('SHARE_FIELD_TOKEN', 'ivfi_share_token');

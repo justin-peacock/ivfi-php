@@ -70,10 +70,47 @@ class componentShare
 		if(this.settings.enabled)
 		{
 			this.shares = this.settings.shares || [];
+
+			this.createShareButton();
 		}
 
 		return this;
 	}
+
+	/**
+	 * Puts sharing beside the path, next to folder creation.
+	 *
+	 * Behind the menu it was easy to miss, which is the same reason the New
+	 * folder button is there. It goes in after that one, so a float sends it
+	 * to the left of it and the button already in the corner does not move,
+	 * and before the path for the reason that one explains: floated there, the
+	 * path narrows to sit beside it rather than running underneath
+	 */
+	private createShareButton = (): void =>
+	{
+		const path = document.body.querySelector(':scope > div.path');
+
+		if(!path || document.body.querySelector(':scope > button.shareFolder'))
+		{
+			return;
+		}
+
+		const button = DOM.new('button', {
+			class : 'shareFolder',
+			type : 'button',
+			text : 'Share'
+		});
+
+		button.prepend(iconElement('link'));
+		path.before(button);
+
+		/**
+		 * Kept out of `boundEvents`, which `close()` empties: that is for the
+		 * panel's own listeners, and this one has to outlive the panel being
+		 * opened and closed
+		 */
+		eventHooks.listen(button, 'click', 'shareFolderButton', () => this.show());
+	};
 
 	/**
 	 * A configured lifetime in words, for the option that names it
