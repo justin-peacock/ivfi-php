@@ -531,6 +531,164 @@ final class ShareLinkTest extends IndexerTestCase
             'path=/file/upstream/holiday/',
             $arrival->cookieAttributes('IVFISHARE')
         );
+
+        /**
+         * And the redirect has to land back inside the mount. The script is
+         * handed the path with the mount stripped, so a bare target would
+         * send the recipient somewhere the cookie is not sent
+         */
+        $this->assertSame('/file/upstream/holiday/', $arrival->header('Location'));
+
+        /* The breadcrumb links what the share covers, and only that */
+        $listing = $server->request('/holiday/', $header);
+
+        preg_match('#<div class="path">.*?</div>#s', $listing->body, $crumb);
+
+        $this->assertNotEmpty($crumb, 'the listing carried no path line');
+
+        $this->assertStringContainsString(
+            '<a href="/file/upstream/holiday"',
+            $crumb[0],
+            'the shared directory was not linked under a prepend'
+        );
+
+        /* Everything above the share is shown, but is not somewhere to go */
+        $this->assertStringContainsString('<span>/upstream</span>', $crumb[0]);
+        $this->assertStringNotContainsString('<a href="/file/upstream"', $crumb[0]);
+    }
+
+    /**
+     * The listing links a directory by its name as it stands, and a browser
+     * handed `/a+b/` asks for `/a+b/`. Encoding the cookie scope more than the
+     * browser does means it is never sent back, and the recipient meets the
+     * password form one directory in.
+     */
+    public function testAShareOfAPunctuatedNameSurvivesNavigation(): void
+    {
+        $fixture = new Fixture('share-punctuation');
+
+        $fixture->directory('a+b!c');
+        $fixture->file('a+b!c/top.txt');
+        $fixture->directory('a+b!c/nested');
+        $fixture->file('a+b!c/nested/deep.txt');
+
+        $fixture->config([
+            'authentication' => [
+                'users' => [self::USER => password_hash(self::PASS, PASSWORD_DEFAULT)],
+                'throttle_path' => $fixture->root(),
+            ],
+            'share' => [
+                'enabled' => true,
+                'path' => $fixture->root() . '/state',
+            ],
+        ]);
+
+        $server = new Server($fixture, []);
+        $this->servers[] = $server;
+
+        $this->signIn($server);
+
+        $response = $server->request('/a+b!c/', [], [
+            'ivfi_share_action' => 'create',
+            'ivfi_csrf' => $this->pageToken($server, '/a+b!c/'),
+        ]);
+
+        $payload = json_decode($response->body, true);
+
+        $this->assertTrue($payload['ok'] ?? false, $response->body);
+
+        /* Left alone, the way the listing's own links leave them */
+        $this->assertSame('/a+b!c/', $payload['share']['url']);
+
+        $server->clearCookies();
+
+        $arrival = $server->request(
+            '/a+b!c/?ivfi_share=' . $payload['share']['token']
+        );
+
+        $this->assertContains('path=/a+b!c/', $arrival->cookieAttributes('IVFISHARE'));
+
+        /* The directory itself, and then one below it on the cookie alone */
+        $this->assertStringContainsString(
+            'top.txt', $server->request('/a+b!c/')->body
+        );
+
+        $this->assertStringContainsString(
+            'deep.txt', $server->request('/a+b!c/nested/')->body
+        );
+    }
+
+    /**
+     * A share never starts a session, so nothing else sends the headers that
+     * keep the listing out of a cache it should not reach.
+     */
+    public function testASharedListingIsNotStorable(): void
+    {
+        $server = $this->serve();
+        $token = $this->mint($server);
+
+        $server->clearCookies();
+
+        $arrival = $server->request('/holiday/?ivfi_share=' . $token);
+        $listing = $server->request('/holiday/');
+
+        foreach (['token exchange' => $arrival, 'listing' => $listing] as $label => $response) {
+            $this->assertStringContainsString(
+                'no-store',
+                (string) $response->header('Cache-Control'),
+                "the {$label} may be stored by a shared cache"
+            );
+
+            $this->assertStringContainsString(
+                'Cookie',
+                (string) $response->header('Vary'),
+                "the {$label} is not keyed on the cookie that makes it differ"
+            );
+        }
+    }
+
+    /**
+     * A read that comes back short decodes as nothing, and a write on top of
+     * that would drop every link already in the store.
+     */
+    public function testMintingRepeatedlyKeepsEveryLink(): void
+    {
+        $server = $this->serve();
+
+        /* Signed in once: `mint()` expects a login form, which only comes once */
+        $this->signIn($server);
+
+        $tokens = [];
+
+        for ($i = 0; $i < 3; $i++) {
+            $response = $server->request('/holiday/', [], [
+                'ivfi_share_action' => 'create',
+                'ivfi_csrf' => $this->pageToken($server, '/holiday/'),
+            ]);
+
+            $payload = json_decode($response->body, true);
+
+            $this->assertTrue($payload['ok'] ?? false, $response->body);
+
+            $tokens[] = $payload['share']['token'];
+
+            /* Every link minted so far is still in the store it came back with */
+            $this->assertCount($i + 1, $payload['shares']);
+        }
+
+        $server->clearCookies();
+
+        foreach ($tokens as $index => $token) {
+            $this->follow($server, '/holiday/', $token);
+
+            $this->assertStringContainsString(
+                'beach.jpg',
+                $server->request('/holiday/')->body,
+                "link {$index} stopped working after the ones minted later"
+            );
+
+            $server->clearCookies();
+        }
     }
 
     /**

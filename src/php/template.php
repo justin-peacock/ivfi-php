@@ -1733,20 +1733,30 @@ function shareStore($config, $mutate = NULL)
     return $writing ? NULL : [];
   }
 
+  flock($handle, LOCK_EX);
+
   /**
    * The file is the set of live capabilities, so it is nobody else's
    * business. Checked every time rather than only on creation, the way the
-   * throttle counter is, so one left behind by an earlier version is fixed
+   * throttle counter is, so one left behind by an earlier version is fixed.
+   *
+   * After the lock, not before: `fileperms()` fills PHP's stat cache, and a
+   * cached size read back after waiting for the lock describes the file as it
+   * was before another request grew it
    */
   if(!$existed || (fileperms($path) & 0777) !== 0600)
   {
     @chmod($path, 0600);
   }
 
-  flock($handle, LOCK_EX);
+  /**
+   * Read from the handle rather than by size. A stale size truncates the JSON,
+   * which then does not decode, and a decode that fails reads as an empty
+   * store: the next write would drop every link that was already in it
+   */
+  rewind($handle);
 
-  $size = filesize($path);
-  $raw = $size > 0 ? fread($handle, $size) : '';
+  $raw = stream_get_contents($handle);
   $stored = json_decode((string) $raw, true);
 
   $shares = [];
@@ -1897,6 +1907,40 @@ function shareNormalizePath($path)
 }
 
 /**
+ * One path segment, encoded the way a browser will ask for it
+ *
+ * Not `rawurlencode()`, which escapes the sub-delimiters too. The listing
+ * writes directory names into links as they are, and a browser handed
+ * `/a+b/` asks for `/a+b/`: it escapes what cannot appear in a path, such as
+ * a space, and leaves `+`, `!` and the rest alone. A cookie's `Path` is
+ * compared against what was asked for, so encoding more than the browser does
+ * means the cookie is never sent and the recipient meets the password form.
+ *
+ * @param String  $segment  A single path segment, decoded
+ *
+ * @return String
+ */
+function shareEncodeSegment($segment)
+{
+  /* RFC 3986 pchar, less the escape character itself */
+  static $safe = "!$&'()*+,;=:@-._~";
+
+  $encoded = '';
+  $length = strlen($segment);
+
+  for($index = 0; $index < $length; $index++)
+  {
+    $character = $segment[$index];
+
+    $encoded .= (ctype_alnum($character) || strpos($safe, $character) !== false)
+      ? $character
+      : sprintf('%%%02X', ord($character));
+  }
+
+  return $encoded;
+}
+
+/**
  * The form of a share root that a browser sees
  *
  * Two things separate it from the stored path. It carries the prepend, so a
@@ -1923,7 +1967,7 @@ function sharePublicPath($path, $prepend = '')
 
   foreach(explode('/', trim($path, '/')) as $segment)
   {
-    $segments[] = rawurlencode($segment);
+    $segments[] = shareEncodeSegment($segment);
   }
 
   $public = '/' . implode('/', $segments) . '/';
@@ -2049,6 +2093,25 @@ function shareCookie($value, $path, $expires, $options)
 }
 
 /**
+ * Keeps a shared listing out of any cache that is not the recipient's own
+ *
+ * A signed-in request gets these from PHP, which sends its session cache
+ * limiter on `session_start()`. A share never starts a session, so without
+ * this the listing sits at a plain URL with nothing saying who it is for, and
+ * a shared cache in front of the site could hand it to the next visitor, or
+ * keep serving it after the link is revoked.
+ *
+ * @return void
+ */
+function shareNoStore()
+{
+  header('Cache-Control: private, no-store, no-cache, must-revalidate, max-age=0');
+  header('Pragma: no-cache');
+  /* The cookie is what makes the answer differ, so it is what caches must key on */
+  header('Vary: Cookie');
+}
+
+/**
  * A live share covering this request, taking a link's token if it carries one
  *
  * @param Array  $config   Configuration values
@@ -2088,6 +2151,8 @@ function shareAccepted($config, $options, $prepend = '')
 
     if($share !== NULL && shareCovers($share, $path))
     {
+      shareNoStore();
+
       shareCookie(
         $token,
         sharePublicPath((string) $share['path'], $prepend),
@@ -2103,7 +2168,19 @@ function shareAccepted($config, $options, $prepend = '')
         $options
       );
 
-      header('Location: ' . authLocalTarget(false));
+      /**
+       * Back to the same page without the token, in the public form. The
+       * script is handed the path with the mount already stripped, so a bare
+       * `Location` would send the recipient to a route outside it
+       */
+      $target = authLocalTarget(false);
+
+      if(is_string($prepend) && trim($prepend, '/') !== '')
+      {
+        $target = '/' . trim($prepend, '/') . $target;
+      }
+
+      header('Location: ' . $target);
 
       exit;
     }
@@ -2120,6 +2197,8 @@ function shareAccepted($config, $options, $prepend = '')
 
     if($share !== NULL && shareCovers($share, $path))
     {
+      shareNoStore();
+
       return $share;
     }
   }
@@ -4792,7 +4871,7 @@ class Indexer extends Helpers
      */
     $reachable = $this->shareRoot === NULL
       ? '/'
-      : rtrim($this->shareRoot, '/') . '/';
+      : $this->handlePathing($this->shareRoot, true);
 
     $output = $reachable === '/'
       ? parent::createElement('a', ['href' => '/'], '/')

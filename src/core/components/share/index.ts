@@ -322,6 +322,27 @@ class componentShare
 	};
 
 	/**
+	 * Takes back the listeners belonging to the rows currently drawn
+	 */
+	private releaseRowListeners = (): void =>
+	{
+		Object.keys(this.boundEvents).forEach((eventId: string) =>
+		{
+			if(!eventId.startsWith('shareCopyClick_')
+				&& !eventId.startsWith('shareRevokeClick_'))
+			{
+				return;
+			}
+
+			const { selector, events } = this.boundEvents[eventId];
+
+			eventHooks.unlisten(selector, events, eventId);
+
+			delete this.boundEvents[eventId];
+		});
+	};
+
+	/**
 	 * Draws the live links, the ones for this folder first
 	 */
 	private renderList = (): void =>
@@ -330,6 +351,15 @@ class componentShare
 		{
 			return;
 		}
+
+		/**
+		 * The rows are rebuilt on every create and revoke, and their listener
+		 * ids are positional, so a redraw would register new ones over the top
+		 * of the old entries in `boundEvents`. The elements they were bound to
+		 * are about to be thrown away, and nothing would be left that could
+		 * take them back out again, so they go first
+		 */
+		this.releaseRowListeners();
 
 		this.list.textContent = '';
 
