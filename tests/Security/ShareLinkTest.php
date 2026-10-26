@@ -159,7 +159,7 @@ final class ShareLinkTest extends IndexerTestCase
         $server->clearCookies();
 
         $arrival = $server->request(sprintf(
-            '%s?ivfi_share=%s', $uri, rawurlencode($token)
+            '%s?share=%s', $uri, rawurlencode($token)
         ));
 
         $this->assertSame(
@@ -203,7 +203,7 @@ final class ShareLinkTest extends IndexerTestCase
 
         $server->clearCookies();
 
-        $arrival = $server->request('/holiday/?ivfi_share=' . $token);
+        $arrival = $server->request('/holiday/?share=' . $token);
 
         $this->assertSame('302 Found', $arrival->header('Status'));
         $this->assertSame('/holiday/', $arrival->header('Location'));
@@ -231,7 +231,7 @@ final class ShareLinkTest extends IndexerTestCase
         $server->clearCookies();
 
         $attributes = $server->request(
-            '/holiday/?ivfi_share=' . $token
+            '/holiday/?share=' . $token
         )->cookieAttributes('IVFISHARE');
 
         $this->assertContains(
@@ -452,7 +452,7 @@ final class ShareLinkTest extends IndexerTestCase
         $server->clearCookies();
 
         $arrival = $server->request(
-            '/summer%20photos/?ivfi_share=' . $payload['share']['token']
+            '/summer%20photos/?share=' . $payload['share']['token']
         );
 
         $this->assertContains(
@@ -524,7 +524,7 @@ final class ShareLinkTest extends IndexerTestCase
         $server->clearCookies();
 
         $arrival = $server->request(
-            '/holiday/?ivfi_share=' . $payload['share']['token'], $header
+            '/holiday/?share=' . $payload['share']['token'], $header
         );
 
         $this->assertContains(
@@ -603,7 +603,7 @@ final class ShareLinkTest extends IndexerTestCase
         $server->clearCookies();
 
         $arrival = $server->request(
-            '/a+b!c/?ivfi_share=' . $payload['share']['token']
+            '/a+b!c/?share=' . $payload['share']['token']
         );
 
         $this->assertContains('path=/a+b!c/', $arrival->cookieAttributes('IVFISHARE'));
@@ -629,7 +629,7 @@ final class ShareLinkTest extends IndexerTestCase
 
         $server->clearCookies();
 
-        $arrival = $server->request('/holiday/?ivfi_share=' . $token);
+        $arrival = $server->request('/holiday/?share=' . $token);
         $listing = $server->request('/holiday/');
 
         foreach (['token exchange' => $arrival, 'listing' => $listing] as $label => $response) {
@@ -884,7 +884,7 @@ final class ShareLinkTest extends IndexerTestCase
 
         $server->clearCookies();
 
-        $response = $server->request('/holiday/?ivfi_share=' . $token);
+        $response = $server->request('/holiday/?share=' . $token);
 
         $this->assertSame('401 Unauthorized', $response->header('Status'));
         $this->assertStringNotContainsString('beach.jpg', $response->body);
@@ -903,7 +903,7 @@ final class ShareLinkTest extends IndexerTestCase
 
         $server->clearCookies();
 
-        $response = $server->request('/holiday/?ivfi_share=' . $token);
+        $response = $server->request('/holiday/?share=' . $token);
 
         $this->assertSame('401 Unauthorized', $response->header('Status'));
         $this->assertStringNotContainsString('beach.jpg', $response->body);
@@ -922,7 +922,7 @@ final class ShareLinkTest extends IndexerTestCase
 
         $server->clearCookies();
 
-        $response = $server->request('/holiday/?ivfi_share=' . $token);
+        $response = $server->request('/holiday/?share=' . $token);
 
         $this->assertSame('401 Unauthorized', $response->header('Status'));
         $this->assertStringNotContainsString('beach.jpg', $response->body);
@@ -1001,7 +1001,7 @@ final class ShareLinkTest extends IndexerTestCase
         $server = new Server($fixture, []);
         $this->servers[] = $server;
 
-        $response = $server->request('/holiday/?ivfi_share=' . str_repeat('a', 64));
+        $response = $server->request('/holiday/?share=' . str_repeat('a', 64));
 
         $this->assertSame('401 Unauthorized', $response->header('Status'));
         $this->assertStringNotContainsString('beach.jpg', $response->body);
