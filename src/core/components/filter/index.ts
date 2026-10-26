@@ -73,9 +73,20 @@ componentFilter.apply = (query = ''): void =>
 	}
 
 	/* Iterate over rows and search for query */
-	for(let i = 1; i < rows.length; i++)
+	for(let i = 0; i < rows.length; i++)
 	{
 		const item = rows[i];
+
+		/**
+		 * The parent row holds no file, and is recognised by its class rather
+		 * than by being row zero: the top of a share has no parent row, and
+		 * skipping the first row regardless would leave a real entry showing
+		 * through a filter that matches nothing, and out of the counts
+		 */
+		if(item.classList.contains('parent'))
+		{
+			continue;
+		}
 
 		if(filterData.reset === true)
 		{

@@ -74,6 +74,52 @@ export type TConfigUpload = {
 };
 
 /**
+ * One live share link, as the backend describes it.
+ *
+ * The link itself is never sent: the client assembles it from this page's own
+ * origin, so the document does not have to trust the `Host` header
+ */
+export type TConfigShareEntry = {
+	token: string;
+	/** The directory it covers, slash wrapped */
+	path: string;
+	/**
+	 * The same directory as a recipient reaches it: percent encoded, and
+	 * carrying the prepend where the script sits behind a proxy mount
+	 */
+	url: string;
+	created: number;
+	/** Unix time it lapses at, where zero means it does not */
+	expires: number;
+};
+
+/**
+ * Share settings, as the backend describes them.
+ *
+ * Everything past `enabled` is only sent to a client the server has already
+ * decided may mint and revoke links, the way `upload` above is
+ */
+export type TConfigShare = {
+	enabled?: boolean;
+	token?: string;
+	/** Query parameter a minted link carries the token on */
+	param?: string;
+	createAction?: string;
+	revokeAction?: string;
+	fields?: {
+		action?: string;
+		share?: string;
+		expiry?: string;
+		token?: string;
+	};
+	/** Whether the directory being viewed may be shared, false at the root */
+	shareable?: boolean;
+	/** The configured default lifetime in seconds, zero for none */
+	expiry?: number;
+	shares?: Array<TConfigShareEntry>;
+};
+
+/**
  * Configuration object (from backend)
  */
 export interface IConfigData extends Omit<TUserStorage, 'style'> {
@@ -86,6 +132,7 @@ export interface IConfigData extends Omit<TUserStorage, 'style'> {
 		}
 	};
 	upload?: TConfigUpload;
+	share?: TConfigShare;
 }
 
 /**

@@ -33,6 +33,9 @@ otherwise interpolated away.
 | `IVFI_UPLOAD_DELETE` | `true` | Whether signed-in users may delete files and empty folders. Deleting is permanent. |
 | `IVFI_UPLOAD_RESTRICT` | | Regex; accept uploads, folder creation and deletion only on matching paths. |
 | `IVFI_MAX_UPLOAD_SIZE` | `100M` | Largest accepted file. The request body limits are set a megabyte above it, since the multipart envelope and the other fields are counted too. Cloudflare's proxy caps request bodies at 100 MB on most plans. |
+| `IVFI_SHARE` | `false` | Whether signed-in users may mint read-only links to a folder. |
+| `IVFI_SHARE_EXPIRY` | | Seconds a new link lasts by default. Unset mints links that do not expire. |
+| `IVFI_SHARE_PATH` | `/data/.ivfi-state` | Where the minted tokens are kept. The default is inside the volume, so links survive a redeploy. |
 | `IVFI_BEHIND_PROXY` | `true` | Trust forwarded headers for the client address and HTTPS. |
 | `IVFI_CLIENT_IP_HEADER` | `CF-Connecting-IP` | Header carrying the client address. Use `X-Forwarded-For` without Cloudflare. |
 
@@ -70,9 +73,34 @@ and the image sets `sandboxed_html` for it. `svg`, `xhtml` and the other active
 formats stay refused for upload, as does a page extension anywhere but the end
 of a name.
 
+## Share links
+
+`IVFI_SHARE` lets a signed-in user pick a folder from the menu and get an
+unguessable link to it. Whoever holds the link can browse that folder and
+everything under it without the password, and can do nothing else: the link is
+accepted without a session, and uploads, folder creation and deletion all
+follow authentication, so they stay closed. The root cannot be shared, since a
+link to it would hand over the whole index.
+
+The link carries a 32-byte token once, which the index swaps for a cookie
+scoped to the shared folder, so the token leaves the address bar and the
+page's own links never carry it. Links are listed and revoked from the same
+menu, and `IVFI_SHARE_EXPIRY` gives new ones a default lifetime.
+
+The tokens live in `/data/.ivfi-state`, mode 0700, which is in the volume and
+so survives a redeploy. nginx declines to serve dotfiles, and the listing
+hides them. Moving or renaming `indexer.php` retires every link it minted,
+because the store is keyed to the script and the directory it serves.
+
 ## Direct file URLs are not gated
 
 Authentication covers the listing. Files under `/data` are served by nginx
 directly, so anyone holding a file's URL can fetch it without signing in. Put
 authentication at the proxy (Cloudflare Access, a Traefik middleware) if the
 files themselves are private.
+
+This is also what a share link does and does not change. The files in a shared
+folder were already reachable to anyone who knew their URLs; the link adds the
+listing, which is the part that was behind the password. It does not put a
+gate in front of the files, and revoking it does not take back a file URL
+someone already has.

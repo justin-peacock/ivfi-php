@@ -67,6 +67,26 @@ if ($username !== null && ($password !== null || $hash !== null)) {
     if (($restrict = env('IVFI_UPLOAD_RESTRICT')) !== null) {
         $config['upload']['restrict'] = $restrict;
     }
+
+    /**
+     * Read-only share links, which only mean anything once there is a password
+     * to hand someone a way round.
+     *
+     * The tokens are left in their default place, a dotted directory at the
+     * base of /data: that is the volume, so they survive a redeploy, while
+     * /var/lib/ivfi is in the container's writable layer and does not.
+     */
+    $config['share'] = [
+        'enabled' => flag('IVFI_SHARE', false),
+    ];
+
+    if (($expiry = env('IVFI_SHARE_EXPIRY')) !== null) {
+        $config['share']['expiry'] = (int) $expiry;
+    }
+
+    if (($sharePath = env('IVFI_SHARE_PATH')) !== null) {
+        $config['share']['path'] = $sharePath;
+    }
 } else {
     fwrite(STDERR, "ivfi: IVFI_USERNAME and IVFI_PASSWORD are not both set; "
         . "the index is public and uploads are off\n");

@@ -311,6 +311,102 @@ return array(
 ?>
 ```
 
+## Share
+
+Key: **`share`**
+
+Mints an unguessable, read-only link to one directory, so it can be sent to
+someone who does not have the password. A signed-in client creates and revokes
+them from the menu. Disabled by default.
+
+| Child key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `enabled` | Bool | `false` | Whether share links may be created and honored. |
+| `path` | Bool/String | `false` | Directory holding the minted tokens. Unset keeps them in `.ivfi-state` at the base of the served tree. |
+| `expiry` | Bool/Int | `false` | Seconds a new link lasts. `false` mints links that do not expire, and a lifetime can be picked per link. |
+
+### What a link grants
+
+The directory it was minted for, and everything under it. Nothing else: not the
+directory above it, not a sibling, and not a sibling whose name merely begins
+the same way, so a link to `/holiday/` never covers `/holiday-invoices/`.
+
+It grants no writes at all. A share is accepted without starting a session, and
+[`upload`](#upload) and its folder and delete controls all follow
+[`authentication`](#authentication), so a client holding one is offered none of
+them and refused by every endpoint behind them. A share cannot be used to mint
+another, either.
+
+A client that is signed in *and* holding a share cookie is served as itself,
+with everything that normally comes with that. The link never takes privileges
+away from someone who already has them.
+
+### The root cannot be shared
+
+A link to `/` would hand over every directory at once and leave the password
+guarding nothing, so it is refused when minting, and refused again when one is
+presented. Open a directory inside the index and share that.
+
+### How the link works
+
+The link carries a token of 32 random bytes once. The index checks it, swaps it
+for a cookie scoped to the shared directory, and redirects to the same page
+without it, which keeps the token out of the address bar and out of the forward
+history. The cookie is `HttpOnly`, `SameSite=Lax`, and `Secure` on HTTPS.
+
+Because the cookie's path covers the shared directory and nothing else, the
+browser sends it for a subdirectory and never for a sibling, and none of the
+page's own links have to carry the token. It lasts as long as the link does, or
+for the browser session when the link does not expire; re-following the link
+costs the recipient nothing.
+
+### Where the tokens are kept
+
+In `ivfi-shares-<id>.json` under `path`, mode `0600`, in a directory created
+`0700`. Unset, that is `.ivfi-state` at the base of the served tree: it rides
+along with the directory being served, and the listing hides anything starting
+with a dot.
+
+> **Prefer a path outside the served tree where you have one.** The file is the
+> set of live links, and a dotfile is only hidden by a server that chooses to
+> hide it: nginx declines them, Apache serves everything but `.ht*`. A
+> `.htaccess` denying access is written alongside, which helps only where
+> `AllowOverride` permits it.
+
+The filename is keyed to the script and to the directory it serves, so two
+installations sharing one `path` cannot read each other's tokens. The other
+side of that is that moving or renaming `indexer.php`, or changing the base
+path, retires every link it minted.
+
+### What a link does not change
+
+On most setups the web server delivers files under the indexed directory
+itself, without consulting this script, so a file's URL already works for
+anyone who has it. A share link adds the **listing**, which is the part that
+was behind the password. It does not put a gate in front of the files, and
+revoking it does not take back a file URL someone already copied.
+
+If the files themselves need to be private, that has to happen in front of the
+script, at the proxy.
+
+Example:
+```php
+<?php
+return array(
+    'authentication' => array(
+        'users' => array(
+            'username' => 'REPLACE WITH THE OUTPUT OF password_hash()'
+        )
+    ),
+    'share' => array(
+        'enabled' => true,
+        'path' => '/var/lib/ivfi',
+        'expiry' => 604800
+    )
+);
+?>
+```
+
 ## Format
 Key: **`format`**
 

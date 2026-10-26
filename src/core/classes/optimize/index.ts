@@ -88,6 +88,19 @@ export default class optimizeClass
 
 		const table: HTMLElement = this.table;
 		const rows: NodeListOf<TOptimizeRowItem> = table.querySelectorAll('tbody > tr');
+
+		/**
+		 * The table can be empty: the top of a share leaves off the parent
+		 * row, so an empty shared folder has no rows at all, and there is
+		 * nothing to measure or to virtualise
+		 */
+		if(rows.length === 0)
+		{
+			log('optimize', 'No rows to optimize.');
+
+			return false;
+		}
+
 		const rowHeight: number = (rows[0] as HTMLElement).offsetHeight;
 		const tableHeight: number = table.offsetHeight;
 		const structure: TOptimizeStructure = {};
@@ -325,10 +338,20 @@ export default class optimizeClass
 
 		const measureStart = performance.now();
 
+		/**
+		 * The parent row is pinned to the top, so it is held back here and put
+		 * in at the end. Recognised by its class rather than by being row
+		 * zero: at the top of a share there is no parent row, and taking the
+		 * first row on faith would pin whatever file happens to sort first
+		 */
+		const parent: TOptimizeRowItem | null = (this.rows.length > 0
+			&& this.rows[0].classList.contains('parent'))
+			? this.rows[0]
+			: null;
+
 		for(let i = 0; i < this.rows.length; i++)
 		{
-			/* Skip parent directory as we'll unshift that in at the end instead */
-			if(i === 0)
+			if(i === 0 && parent)
 			{
 				continue;
 			}
@@ -355,7 +378,10 @@ export default class optimizeClass
 			rows.push(this.rows[items[i].index]);
 		}
 
-		rows.unshift(this.rows[0]);
+		if(parent)
+		{
+			rows.unshift(parent);
+		}
 
 		this.rows = rows;
 		this.refactor();

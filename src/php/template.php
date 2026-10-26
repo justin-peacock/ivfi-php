@@ -102,6 +102,46 @@ $config = [
       'restrict' => false
     ],
     /**
+     * Read-only share links
+     *
+     * Mints an unguessable link that lets someone browse one directory, and
+     * what is under it, without the password. A signed-in client creates and
+     * revokes them from the menu.
+     *
+     * A share carries no write of any kind: it is granted without a session,
+     * and uploads, folder creation and deletion all follow `authentication`
+     * above, so they stay closed to it. The root cannot be shared, since a
+     * link to it would hand over the whole index and leave the password
+     * guarding nothing.
+     *
+     *   'share' => [
+     *     'enabled' => true,
+     *     'path' => '/var/lib/ivfi',  // where the tokens are kept
+     *     'expiry' => 604800          // default link lifetime in seconds
+     *   ]
+     */
+    'share' => [
+      /* Whether share links may be created and honoured */
+      'enabled' => false,
+      /**
+       * Directory holding the minted tokens.
+       *
+       * Unset keeps them in a dotted directory at the base of the served
+       * tree, which persists and which the listing hides. Prefer a path
+       * outside the served tree where you have one: the file is the set of
+       * live capabilities, and a web server that serves dotfiles would hand
+       * it out
+       */
+      'path' => false,
+      /**
+       * Seconds a new link lasts, counted from when it is minted.
+       *
+       * `false` mints links that do not expire. A lifetime can also be picked
+       * per link when creating one
+       */
+      'expiry' => false
+    ],
+    /**
      * Enables single-page features
      */
     'single_page' => false,
@@ -364,6 +404,7 @@ class Helpers
     'corner-left-up' => '<path d="M14 9 9 4 4 9"/><path d="M20 20h-7a4 4 0 0 1-4-4V4"/>',
     'download' => '<path d="M12 15V3"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/>',
     'log-out' => '<path d="m16 17 5-5-5-5"/><path d="M21 12H9"/><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>',
+    'link' => '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
     ];
 
     if(!isset($shapes[$name]))
@@ -458,11 +499,16 @@ class Helpers
    * A realpath alternative that solves links by using
    * a string-based approach instead
    *
+   * Public because the share gate needs it as well, and on a request URI
+   * rather than a filesystem path: a share is decided before anything is
+   * resolved on disk, so the `..` a client can put in the request line has
+   * to be folded away first or a link to one directory would cover another
+   *
    * @param String  $input  A path
-   * 
+   *
    * @return String
-   */ 
-  private static function removeDotSegments($input)
+   */
+  public static function removeDotSegments($input)
   {
     $output = '';
 
@@ -713,6 +759,34 @@ define('AUTH_FIELD_PASS', 'ivfi_pass');
 define('AUTH_FIELD_CSRF', 'ivfi_csrf');
 /** Query parameter that signs the client out */
 define('AUTH_PARAM_LOGOUT', 'ivfi_logout');
+/** Name of the cookie carrying an accepted share token */
+define('SHARE_COOKIE_NAME', 'IVFISHARE');
+/**
+ * Directory the minted tokens go in when `share.path` is unset.
+ *
+ * A dotted name at the base of the served tree: the listing skips anything
+ * beginning with a dot, and it rides along with the directory being served,
+ * which is the one thing certain to outlive a redeploy
+ */
+define('SHARE_STATE_DIRECTORY', '.ivfi-state');
+/** Query parameter a share link arrives on */
+define('SHARE_PARAM', 'ivfi_share');
+/** Field names used by the share endpoint */
+define('SHARE_FIELD_ACTION', 'ivfi_share_action');
+define('SHARE_FIELD_TOKEN', 'ivfi_share_token');
+define('SHARE_FIELD_EXPIRY', 'ivfi_share_expiry');
+/** Values of `SHARE_FIELD_ACTION` that mark what a request is asking for */
+define('SHARE_ACTION_CREATE', 'create');
+define('SHARE_ACTION_REVOKE', 'revoke');
+/**
+ * Bytes of randomness behind a token.
+ *
+ * The token is the whole of the secret: it stands in for a password, it is
+ * rendered into a link that travels through other people's software, and it
+ * is checked against a store rather than a per-request challenge. 32 bytes
+ * is far past guessing, and is what the session identifier gets as well
+ */
+define('SHARE_TOKEN_BYTES', 32);
 /** Field names used by the upload endpoint */
 define('UPLOAD_FIELD_ACTION', 'ivfi_action');
 define('UPLOAD_FIELD_FILE', 'ivfi_file');
@@ -1234,31 +1308,28 @@ function authCredentialsAreHashed($users)
 }
 
 /**
- * Requires a signed-in session, or presents the login page
+ * Starts this script's own session, taking over any other that is running
  *
- * Replaces the previous HTTP digest scheme, which fixed the hash to MD5,
- * needed a password equivalent on disk, offered no way to sign out and
- * re-authenticated on every request.
+ * `session_set_cookie_params()` and `session_name()` only work before a
+ * session exists. Called while one is active (session.auto_start, or an
+ * earlier session_start) they warn and return false, and the cookie keeps
+ * PHP's defaults: no HttpOnly, no SameSite, no Secure, and the wrong name.
+ * Skipping them in that case would avoid the warning but leave every
+ * protection here switched off, so close it and start our own instead.
  *
- * @param Array   $users    Username to password hash map
- * @param String  $realm    Unused, kept so the call sites read the same
- * @param Array   $options  Authentication options
+ * @param Array  $options  Authentication options
  *
- * @return Void
+ * @return Boolean  Whether a session is running when this returns
  */
-function authenticate($users, $realm, $options = [])
+function authSessionStart($options)
 {
+  /* Already ours, so there is nothing to take over */
+  if(session_status() === PHP_SESSION_ACTIVE
+    && session_name() === AUTH_SESSION_NAME)
+  {
+    return true;
+  }
 
-  /**
-   * Close any session that was already running before taking over.
-   *
-   * `session_set_cookie_params()` and `session_name()` only work before a
-   * session exists. Called while one is active (session.auto_start, or an
-   * earlier session_start) they warn and return false, and the cookie keeps
-   * PHP's defaults: no HttpOnly, no SameSite, no Secure, and the wrong name.
-   * Skipping them in that case would avoid the warning but leave every
-   * protection here switched off, so close it and start our own instead
-   */
   if(session_status() === PHP_SESSION_ACTIVE)
   {
     session_write_close();
@@ -1288,6 +1359,70 @@ function authenticate($users, $realm, $options = [])
     session_name(AUTH_SESSION_NAME);
     session_start();
   }
+
+  return session_status() === PHP_SESSION_ACTIVE;
+}
+
+/**
+ * Whether the running session names a configured user and has not gone idle
+ *
+ * Asked before a share link is looked at, so that a client holding both a
+ * session and a share cookie is served as itself rather than as the share:
+ * the share would otherwise take its own privileges away.
+ *
+ * Reads only. `authenticate()` is what accepts a session, and what marks it
+ * as seen.
+ *
+ * @param Array  $users  Username to password hash map
+ *
+ * @return Boolean
+ */
+function authSessionIsValid($users)
+{
+  return is_array($users)
+    && isset($_SESSION['user'], $_SESSION['seen'])
+    && isset($users[$_SESSION['user']])
+    && (time() - (int) $_SESSION['seen']) < AUTH_IDLE_TIMEOUT;
+}
+
+/**
+ * Whether this request already carries a session worth honouring
+ *
+ * The session is only started when the client presents one. Starting it
+ * unconditionally would create a session, and send a cookie, for every
+ * anonymous visitor following a share link.
+ *
+ * @param Array  $users    Username to password hash map
+ * @param Array  $options  Authentication options
+ *
+ * @return Boolean
+ */
+function authHasSession($users, $options)
+{
+  if(!isset($_COOKIE[AUTH_SESSION_NAME]))
+  {
+    return false;
+  }
+
+  return authSessionStart($options) && authSessionIsValid($users);
+}
+
+/**
+ * Requires a signed-in session, or presents the login page
+ *
+ * Replaces the previous HTTP digest scheme, which fixed the hash to MD5,
+ * needed a password equivalent on disk, offered no way to sign out and
+ * re-authenticated on every request.
+ *
+ * @param Array   $users    Username to password hash map
+ * @param String  $realm    Unused, kept so the call sites read the same
+ * @param Array   $options  Authentication options
+ *
+ * @return Void
+ */
+function authenticate($users, $realm, $options = [])
+{
+  authSessionStart($options);
 
   /* Signing out is a state change, so it carries the same token as the form */
   if(isset($_GET[AUTH_PARAM_LOGOUT]))
@@ -1353,9 +1488,7 @@ function authenticate($users, $realm, $options = [])
   }
 
   /* Already signed in? */
-  if(isset($_SESSION['user'], $_SESSION['seen'])
-    && isset($users[$_SESSION['user']])
-    && (time() - (int) $_SESSION['seen']) < AUTH_IDLE_TIMEOUT)
+  if(authSessionIsValid($users))
   {
     $_SESSION['seen'] = time();
 
@@ -1433,6 +1566,1006 @@ function authenticate($users, $realm, $options = [])
   header('Location: ' . authLocalTarget());
 
   exit;
+}
+
+/**
+ * Whether share links may be created and honoured
+ *
+ * @param Array  $config  Configuration values
+ *
+ * @return Boolean
+ */
+function shareIsEnabled($config)
+{
+  return isset($config['share'])
+    && is_array($config['share'])
+    && !empty($config['share']['enabled']);
+}
+
+/**
+ * Directory the minted tokens are kept in
+ *
+ * @param Array  $config  Configuration values
+ *
+ * @return String
+ */
+function shareStoreDirectory($config)
+{
+  if(isset($config['share']['path'])
+    && is_string($config['share']['path'])
+    && $config['share']['path'] !== '')
+  {
+    return rtrim($config['share']['path'], DIRECTORY_SEPARATOR);
+  }
+
+  /**
+   * A dotted directory at the base of the served tree. It is the one place
+   * that is certain to exist and to survive a redeploy, the listing skips
+   * anything beginning with a dot, and the container's server declines to
+   * serve dotfiles at all
+   */
+  return rtrim(BASE_PATH, DIRECTORY_SEPARATOR)
+    . DIRECTORY_SEPARATOR . SHARE_STATE_DIRECTORY;
+}
+
+/**
+ * Path of the file holding the minted tokens
+ *
+ * @param Array  $config  Configuration values
+ *
+ * @return String
+ */
+function shareStorePath($config)
+{
+  /**
+   * Keyed to this script *and* the tree it serves, so two installations
+   * pointed at one directory cannot read each other's tokens. They would
+   * otherwise honor each other's links, and a path compared against the
+   * wrong tree is a link to a directory nobody shared.
+   *
+   * Moving or renaming the script therefore retires the links it minted,
+   * which is the safer way round for a stored capability
+   */
+  $identity = substr(hash('sha256', __FILE__ . '|' . BASE_PATH), 0, 16);
+
+  return shareStoreDirectory($config) . DIRECTORY_SEPARATOR
+    . sprintf('ivfi-shares-%s.json', $identity);
+}
+
+/**
+ * Creates the store directory, and tries to keep it from being served
+ *
+ * @param Array  $config  Configuration values
+ *
+ * @return Boolean
+ */
+function shareStoreDirectoryIsReady($config)
+{
+  $directory = shareStoreDirectory($config);
+
+  if(!is_dir($directory)
+    && !@mkdir($directory, 0700, true)
+    && !is_dir($directory))
+  {
+    error_log(sprintf(
+      'IVFi: cannot create the share store directory at %s, share links cannot be minted',
+      $directory
+    ));
+
+    return false;
+  }
+
+  /**
+   * Carried out for a directory that was already there as well as one just
+   * created. An operator who makes `share.path` in advance would otherwise
+   * get the store without the deny rule, and mode 0600 does not keep Apache
+   * from serving the file: the web server can read it, which is the point
+   */
+
+  /**
+   * The default location sits inside the served tree, and a dotfile is only
+   * hidden by the server that chooses to hide it: nginx declines them, Apache
+   * serves everything but `.ht*`. The file is the set of live links, so leave
+   * behind the one instruction Apache does read
+   */
+  $denyFile = $directory . DIRECTORY_SEPARATOR . '.htaccess';
+
+  if(!file_exists($denyFile))
+  {
+    @file_put_contents($denyFile, implode(PHP_EOL, [
+      '<IfModule mod_authz_core.c>',
+      '  Require all denied',
+      '</IfModule>',
+      '<IfModule !mod_authz_core.c>',
+      '  Order allow,deny',
+      '  Deny from all',
+      '</IfModule>',
+      ''
+    ]));
+  }
+
+  return true;
+}
+
+/**
+ * Reads the minted tokens, and optionally changes them
+ *
+ * Kept in one function so the file is opened, locked, changed and closed in a
+ * single place, the way the login throttle is.
+ *
+ * @param Array     $config  Configuration values
+ * @param Callable  $mutate  Given the live shares, returns the list to store
+ *
+ * @return Array  The live shares, or NULL when a write could not be made
+ */
+function shareStore($config, $mutate = NULL)
+{
+  $path = shareStorePath($config);
+  $writing = ($mutate !== NULL);
+
+  if(!file_exists($path))
+  {
+    /**
+     * Nothing stored is simply no shares. Opening for update would create the
+     * file, so a plain listing would need somewhere writable and would leave
+     * one behind on every index that never mints a link
+     */
+    if(!$writing)
+    {
+      return [];
+    }
+
+    if(!shareStoreDirectoryIsReady($config))
+    {
+      return NULL;
+    }
+  }
+
+  $existed = file_exists($path);
+  $handle = @fopen($path, 'c+');
+
+  if($handle === false)
+  {
+    error_log(sprintf(
+      'IVFi: cannot open the share store at %s', $path
+    ));
+
+    return $writing ? NULL : [];
+  }
+
+  flock($handle, LOCK_EX);
+
+  /**
+   * The file is the set of live capabilities, so it is nobody else's
+   * business. Checked every time rather than only on creation, the way the
+   * throttle counter is, so one left behind by an earlier version is fixed.
+   *
+   * After the lock, not before: `fileperms()` fills PHP's stat cache, and a
+   * cached size read back after waiting for the lock describes the file as it
+   * was before another request grew it
+   */
+  if(!$existed || (fileperms($path) & 0777) !== 0600)
+  {
+    @chmod($path, 0600);
+  }
+
+  /**
+   * Read from the handle rather than by size. A stale size truncates the JSON,
+   * which then does not decode, and a decode that fails reads as an empty
+   * store: the next write would drop every link that was already in it
+   */
+  rewind($handle);
+
+  $raw = stream_get_contents($handle);
+  $stored = json_decode((string) $raw, true);
+
+  $shares = [];
+
+  if(is_array($stored) && isset($stored['shares']) && is_array($stored['shares']))
+  {
+    foreach($stored['shares'] as $share)
+    {
+      /* Anything that is not a usable record is dropped rather than carried */
+      if(is_array($share)
+        && isset($share['token'], $share['path'])
+        && is_string($share['token'])
+        && is_string($share['path'])
+        && !shareHasExpired($share))
+      {
+        $shares[] = $share;
+      }
+    }
+  }
+
+  if($writing)
+  {
+    $shares = $mutate($shares);
+
+    $encoded = json_encode([
+      'version' => 1,
+      'shares' => array_values($shares)
+    ]);
+
+    /**
+     * Every step is checked, because the caller reports success from what
+     * comes back. A full disk or a quota that stops the write halfway would
+     * otherwise hand someone a link that was never stored, or acknowledge a
+     * revocation that did not take
+     */
+    $written = $encoded !== false
+      && ftruncate($handle, 0)
+      && rewind($handle)
+      && fwrite($handle, $encoded) === strlen($encoded)
+      && fflush($handle);
+
+    flock($handle, LOCK_UN);
+    fclose($handle);
+
+    if(!$written)
+    {
+      error_log(sprintf('IVFi: could not write the share store at %s', $path));
+
+      return NULL;
+    }
+
+    return $shares;
+  }
+
+  flock($handle, LOCK_UN);
+  fclose($handle);
+
+  return $shares;
+}
+
+/**
+ * Whether a stored share has reached the end of its life
+ *
+ * @param Array    $share  A stored share
+ * @param Integer  $now    The moment to judge it against
+ *
+ * @return Boolean
+ */
+function shareHasExpired($share, $now = NULL)
+{
+  if(!isset($share['expires']) || !$share['expires'])
+  {
+    return false;
+  }
+
+  return ((int) $share['expires']) <= ($now === NULL ? time() : $now);
+}
+
+/**
+ * A request path reduced to the form a share is compared against
+ *
+ * @param String  $path  A path, or a whole request URI
+ *
+ * @return String  Always slash wrapped, NULL for anything unusable
+ */
+function shareNormalizePath($path)
+{
+  if(!is_string($path))
+  {
+    return NULL;
+  }
+
+  /**
+   * A null byte truncates the path for anything that later hands it to the
+   * filesystem, so the comparison here and the lookup there would be against
+   * different strings. Nothing legitimate carries one
+   */
+  if(strpos($path, "\0") !== false)
+  {
+    return NULL;
+  }
+
+  /* Neither the query nor a fragment is part of the path a share covers */
+  foreach(['?', '#'] as $mark)
+  {
+    if(($at = strpos($path, $mark)) !== false)
+    {
+      $path = substr($path, 0, $at);
+    }
+  }
+
+  /* A backslash is a separator to enough software to not leave it standing */
+  $path = str_replace('\\', '/', $path);
+
+  /**
+   * Runs of separators, collapsed *before* the dot segments are folded away.
+   *
+   * The order matters: `/holiday//../private/` has an empty segment between
+   * the two, so a `..` applied first consumes that instead of `holiday` and
+   * leaves `/holiday/private/`, which is inside the share. The filesystem
+   * reads the same request as `/private/`, which is not, and the gap between
+   * those two readings is the whole vulnerability
+   */
+  $path = preg_replace('#/+#', '/', $path);
+
+  if($path === NULL)
+  {
+    return NULL;
+  }
+
+  /**
+   * Fold away `.` and `..`.
+   *
+   * `REQUEST_URI` is the request line as it arrived, not a resolved path:
+   * nginx normalizes its own `$uri` for routing but passes this through
+   * untouched, and `CURRENT_URI` then decodes any `%2e%2e` in it. Without
+   * this, a link to `/holiday/` would cover `/holiday/../private/` too, and
+   * the share would read out a directory nobody shared
+   */
+  $path = Helpers::removeDotSegments('/' . ltrim($path, '/'));
+
+  /**
+   * A trailing slash on both sides of the eventual comparison, so a match
+   * lands on a path boundary: `/holiday/` must not be found to cover
+   * `/holiday-invoices/`
+   */
+  return '/' . trim($path, '/') . (trim($path, '/') === '' ? '' : '/');
+}
+
+/**
+ * One path segment, encoded the way a browser will ask for it
+ *
+ * Not `rawurlencode()`, which escapes the sub-delimiters too. The listing
+ * writes directory names into links as they are, and a browser handed
+ * `/a+b/` asks for `/a+b/`: it escapes what cannot appear in a path, such as
+ * a space, and leaves `+`, `!` and the rest alone. A cookie's `Path` is
+ * compared against what was asked for, so encoding more than the browser does
+ * means the cookie is never sent and the recipient meets the password form.
+ *
+ * @param String  $segment  A single path segment, decoded
+ *
+ * @return String
+ */
+function shareEncodeSegment($segment)
+{
+  /* RFC 3986 pchar, less the escape character itself */
+  static $safe = "!$&'()*+,;=:@-._~";
+
+  $encoded = '';
+  $length = strlen($segment);
+
+  for($index = 0; $index < $length; $index++)
+  {
+    $character = $segment[$index];
+
+    $encoded .= (ctype_alnum($character) || strpos($safe, $character) !== false)
+      ? $character
+      : sprintf('%%%02X', ord($character));
+  }
+
+  return $encoded;
+}
+
+/**
+ * The form of a share root that a browser sees
+ *
+ * Two things separate it from the stored path. It carries the prepend, so a
+ * script reached through a proxy mount describes itself the way its own links
+ * already do; and every segment is percent encoded, because a cookie's `Path`
+ * is matched against the request target, which is encoded. A share of
+ * `/summer photos/` scoped to the decoded name is simply never sent back.
+ *
+ * @param String  $path     A stored share path
+ * @param String  $prepend  The prepend path, if any
+ *
+ * @return String  NULL when the path is unusable
+ */
+function sharePublicPath($path, $prepend = '')
+{
+  $path = shareNormalizePath($path);
+
+  if($path === NULL || $path === '' || $path === '/')
+  {
+    return NULL;
+  }
+
+  $segments = [];
+
+  foreach(explode('/', trim($path, '/')) as $segment)
+  {
+    $segments[] = shareEncodeSegment($segment);
+  }
+
+  $public = '/' . implode('/', $segments) . '/';
+
+  if(is_string($prepend) && trim($prepend, '/') !== '')
+  {
+    $public = '/' . trim($prepend, '/') . $public;
+  }
+
+  return $public;
+}
+
+/**
+ * Whether a share covers a path
+ *
+ * @param Array   $share  A stored share
+ * @param String  $path   A normalized request path
+ *
+ * @return Boolean
+ */
+function shareCovers($share, $path)
+{
+  if(!is_array($share) || !isset($share['path'])
+    || $path === NULL || $path === '')
+  {
+    return false;
+  }
+
+  $root = shareNormalizePath((string) $share['path']);
+
+  /**
+   * The root of the index is never covered, whatever the store says. A link
+   * to it would hand over every directory at once and leave the password
+   * guarding nothing, so it is refused when minting and refused again here,
+   * where a hand-edited store cannot get round it
+   */
+  if($root === NULL || $root === '/' || $root === '')
+  {
+    return false;
+  }
+
+  return Helpers::startsWith($path, $root);
+}
+
+/**
+ * The stored share a token names, when it is still live
+ *
+ * @param Array   $config  Configuration values
+ * @param String  $token   A token, as a client presented it
+ *
+ * @return Array  NULL when no live share carries it
+ */
+function shareFind($config, $token)
+{
+  /* Shaped like one of ours before the store is read at all */
+  if(!is_string($token)
+    || !preg_match('/^[a-f0-9]{' . (SHARE_TOKEN_BYTES * 2) . '}$/', $token))
+  {
+    return NULL;
+  }
+
+  foreach(shareStore($config) as $share)
+  {
+    /**
+     * Compared in constant time. The store is small and the comparison is
+     * cheap either way, so there is no reason to let the time taken describe
+     * how much of a guessed token was right
+     */
+    if(isset($share['token'])
+      && is_string($share['token'])
+      && hash_equals($share['token'], $token))
+    {
+      return $share;
+    }
+  }
+
+  return NULL;
+}
+
+/**
+ * Sets or clears the cookie that carries an accepted token
+ *
+ * @param String   $value    The token, or an empty string to clear it
+ * @param String   $path     The share root the cookie is scoped to
+ * @param Integer  $expires  When the cookie lapses, 0 for the session
+ * @param Array    $options  Authentication options
+ *
+ * @return void
+ */
+function shareCookie($value, $path, $expires, $options)
+{
+  /* Nothing to scope it to, so nothing worth setting */
+  if($path === NULL || $path === '')
+  {
+    return;
+  }
+
+  $params = [
+    'expires' => $expires,
+    'path' => $path,
+    'domain' => '',
+    'secure' => authIsSecureRequest($options),
+    /* Never read by the page's own script, so it has no business being visible to it */
+    'httponly' => true,
+    /**
+     * A share link is followed from somewhere else, which is a cross-site
+     * navigation: `Strict` would withhold the cookie on arrival and the
+     * recipient would be asked for a password they do not have
+     */
+    'samesite' => 'Lax'
+  ];
+
+  if(PHP_VERSION_ID >= 70300)
+  {
+    setcookie(SHARE_COOKIE_NAME, $value, $params);
+  } else {
+    setcookie(
+      SHARE_COOKIE_NAME, $value, $params['expires'],
+      $params['path'] . '; samesite=' . $params['samesite'],
+      $params['domain'], $params['secure'], $params['httponly']
+    );
+  }
+}
+
+/**
+ * Keeps a shared listing out of any cache that is not the recipient's own
+ *
+ * A signed-in request gets these from PHP, which sends its session cache
+ * limiter on `session_start()`. A share never starts a session, so without
+ * this the listing sits at a plain URL with nothing saying who it is for, and
+ * a shared cache in front of the site could hand it to the next visitor, or
+ * keep serving it after the link is revoked.
+ *
+ * @return void
+ */
+function shareNoStore()
+{
+  header('Cache-Control: private, no-store, no-cache, must-revalidate, max-age=0');
+  header('Pragma: no-cache');
+  /* The cookie is what makes the answer differ, so it is what caches must key on */
+  header('Vary: Cookie');
+}
+
+/**
+ * A live share covering this request, taking a link's token if it carries one
+ *
+ * @param Array  $config   Configuration values
+ * @param Array  $options  Authentication options
+ *
+ * @return Array  NULL when the request has to go to the password instead
+ */
+function shareAccepted($config, $options, $prepend = '')
+{
+  if(!shareIsEnabled($config))
+  {
+    return NULL;
+  }
+
+  $path = shareNormalizePath(CURRENT_URI);
+
+  /* Nothing covers the root, so there is nothing worth looking up */
+  if($path === NULL || $path === '/' || $path === '')
+  {
+    return NULL;
+  }
+
+  /**
+   * A token in the link is exchanged for a cookie scoped to the share, and
+   * then dropped from the address.
+   *
+   * It keeps the secret out of the address bar, out of whatever reads a URL
+   * back out of the page afterwards, and out of the forward history. It also
+   * means none of the page's own links need to carry it: the cookie's path
+   * covers the shared directory and everything under it, so it is sent for a
+   * subdirectory and never for a sibling
+   */
+  if(isset($_GET[SHARE_PARAM]))
+  {
+    $token = (string) $_GET[SHARE_PARAM];
+    $share = shareFind($config, $token);
+
+    if($share !== NULL && shareCovers($share, $path))
+    {
+      shareNoStore();
+
+      shareCookie(
+        $token,
+        sharePublicPath((string) $share['path'], $prepend),
+        /**
+         * A link that expires carries a cookie that expires with it.
+         * Otherwise it lasts the browser session: the recipient still holds
+         * the link, so re-following it costs them nothing, and a capability
+         * is better off not sitting on a shared computer indefinitely
+         */
+        shareHasExpired($share) ? 1 : (isset($share['expires']) && $share['expires']
+          ? (int) $share['expires']
+          : 0),
+        $options
+      );
+
+      /**
+       * Back to the same page without the token, in the public form. The
+       * script is handed the path with the mount already stripped, so a bare
+       * `Location` would send the recipient to a route outside it
+       */
+      $target = authLocalTarget(false);
+
+      if(is_string($prepend) && trim($prepend, '/') !== '')
+      {
+        $target = '/' . trim($prepend, '/') . $target;
+      }
+
+      header('Location: ' . $target);
+
+      exit;
+    }
+
+    /**
+     * A token that names nothing, has lapsed, or covers some other directory
+     * falls through to the password without being told which it was
+     */
+  }
+
+  if(isset($_COOKIE[SHARE_COOKIE_NAME]))
+  {
+    $share = shareFind($config, (string) $_COOKIE[SHARE_COOKIE_NAME]);
+
+    if($share !== NULL && shareCovers($share, $path))
+    {
+      shareNoStore();
+
+      return $share;
+    }
+  }
+
+  return NULL;
+}
+
+/**
+ * The directory a share root actually names on disk
+ *
+ * @param Array   $share  A stored share
+ *
+ * @return String  NULL when it resolves to nothing usable
+ */
+function shareResolvedRoot($share)
+{
+  if(!is_array($share) || !isset($share['path']))
+  {
+    return NULL;
+  }
+
+  $root = shareNormalizePath((string) $share['path']);
+
+  if($root === NULL || $root === '/' || $root === '')
+  {
+    return NULL;
+  }
+
+  $resolved = realpath(Helpers::joinPaths(BASE_PATH, $root));
+  $base = realpath(BASE_PATH);
+
+  if($resolved === false || $base === false || !is_dir($resolved))
+  {
+    return NULL;
+  }
+
+  /**
+   * A root that resolves to the base is the whole index under another name,
+   * which a symbolic link is enough to arrange. Refused here so it is caught
+   * wherever the share is used, not only where it was minted
+   */
+  if($resolved === $base)
+  {
+    return NULL;
+  }
+
+  return $resolved;
+}
+
+/**
+ * Whether a share covers the directory the Indexer resolved
+ *
+ * This is the check that decides, and the string comparison in `shareCovers()`
+ * is only what lets a link reach this point without a password form.
+ *
+ * It has to be this way round. The request path and the directory it names are
+ * not the same thing, and three ways of telling them apart have already been
+ * found: `CURRENT_URI` is decoded once and the Indexer decodes it again, so
+ * `%252e%252e` is a traversal to one and not the other; a name holding a `#`
+ * decodes into something a reader of URIs truncates; and a symbolic link makes
+ * a path inside the share resolve somewhere else entirely. Comparing resolved
+ * directories answers all three at once, and whatever the fourth turns out to
+ * be, instead of predicting what the Indexer will do with a string.
+ *
+ * @param Array    $share    A stored share
+ * @param Indexer  $indexer  The Indexer, already constructed
+ *
+ * @return Boolean
+ */
+function shareCoversResolved($share, $indexer)
+{
+  $root = shareResolvedRoot($share);
+
+  if($root === NULL)
+  {
+    return false;
+  }
+
+  $current = realpath($indexer->path);
+
+  if($current === false)
+  {
+    return false;
+  }
+
+  if($current === $root)
+  {
+    return true;
+  }
+
+  /* A separator on both sides, so the match lands on a path boundary */
+  return Helpers::startsWith(
+    rtrim($current, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR,
+    rtrim($root, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR
+  );
+}
+
+/**
+ * Whether this request may mint and revoke share links
+ *
+ * @param Array    $config         Configuration values
+ * @param Boolean  $authenticated  Whether the request carries a signed-in session
+ *
+ * @return Boolean
+ */
+function shareIsManageable($config, $authenticated)
+{
+  /**
+   * Minting a link hands out access, so it follows `authentication` the way
+   * uploading does. A share cannot be used to mint another
+   */
+  return shareIsEnabled($config) && $authenticated;
+}
+
+/**
+ * How long a new link should last, in seconds
+ *
+ * @param Array   $config    Configuration values
+ * @param String  $requested What the request asked for, if anything
+ *
+ * @return Integer  0 for a link that does not expire
+ */
+function shareRequestedLifetime($config, $requested)
+{
+  /* Ten years, past which a lifetime is indistinguishable from none */
+  $ceiling = 315360000;
+
+  if($requested !== NULL && $requested !== '')
+  {
+    if(!preg_match('/^[0-9]+$/', (string) $requested))
+    {
+      return NULL;
+    }
+
+    return min((int) $requested, $ceiling);
+  }
+
+  $default = isset($config['share']['expiry']) ? $config['share']['expiry'] : false;
+
+  return (is_int($default) && $default > 0) ? min($default, $ceiling) : 0;
+}
+
+/**
+ * Handles a request to mint or revoke a share link, and returns otherwise
+ *
+ * @param Indexer  $indexer     Indexer class
+ * @param Array    $config      Configuration values
+ * @param Boolean  $manageable  Whether this request may manage shares
+ *
+ * @return void
+ */
+function handleShare($indexer, $config, $manageable, $prepend = '')
+{
+  if(($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST'
+    || !isset($_POST[SHARE_FIELD_ACTION]))
+  {
+    return;
+  }
+
+  $action = (string) $_POST[SHARE_FIELD_ACTION];
+
+  if($action !== SHARE_ACTION_CREATE && $action !== SHARE_ACTION_REVOKE)
+  {
+    return;
+  }
+
+  if(!$manageable)
+  {
+    uploadRespond(403, [
+      'ok' => false,
+      'error' => 'Share links are not available here.'
+    ]);
+  }
+
+  /* Same token as the upload endpoint and the login form */
+  if(empty($_SESSION['csrf'])
+    || !isset($_POST[AUTH_FIELD_CSRF])
+    || !hash_equals($_SESSION['csrf'], (string) $_POST[AUTH_FIELD_CSRF]))
+  {
+    uploadRespond(403, [
+      'ok' => false,
+      'error' => 'This page has gone stale. Reload it and try again.'
+    ]);
+  }
+
+  if($action === SHARE_ACTION_REVOKE)
+  {
+    $token = isset($_POST[SHARE_FIELD_TOKEN])
+      ? (string) $_POST[SHARE_FIELD_TOKEN]
+      : '';
+
+    $removed = false;
+
+    $result = shareStore($config, function($shares) use ($token, &$removed)
+    {
+      $kept = [];
+
+      foreach($shares as $share)
+      {
+        if(isset($share['token']) && hash_equals((string) $share['token'], $token))
+        {
+          $removed = true;
+
+          continue;
+        }
+
+        $kept[] = $share;
+      }
+
+      return $kept;
+    });
+
+    if($result === NULL)
+    {
+      uploadRespond(500, [
+        'ok' => false,
+        'error' => 'The share store could not be written.'
+      ]);
+    }
+
+    uploadRespond($removed ? 200 : 404, [
+      'ok' => $removed,
+      'error' => $removed ? NULL : 'That link had already gone.',
+      'shares' => shareVisible($result, $prepend)
+    ]);
+  }
+
+  /**
+   * The directory the Indexer settled on, not the one the request asked for:
+   * it has already refused anything outside the base directory, so a link
+   * cannot be minted for a path a listing could not show
+   */
+  $path = shareNormalizePath($indexer->getCurrentDirectory());
+
+  if($path === NULL || $path === '/' || $path === '')
+  {
+    uploadRespond(400, [
+      'ok' => false,
+      'error' => 'The root cannot be shared. Open a directory inside it first.'
+    ]);
+  }
+
+  /**
+   * And refused again once resolved, so a link that merely leads back to the
+   * base, which a symbolic link is enough to arrange, cannot be minted either
+   */
+  if(shareResolvedRoot(['path' => $path]) === NULL)
+  {
+    uploadRespond(400, [
+      'ok' => false,
+      'error' => 'That folder cannot be shared.'
+    ]);
+  }
+
+  $lifetime = shareRequestedLifetime($config, isset($_POST[SHARE_FIELD_EXPIRY])
+    ? (string) $_POST[SHARE_FIELD_EXPIRY]
+    : NULL
+  );
+
+  if($lifetime === NULL)
+  {
+    uploadRespond(400, [
+      'ok' => false,
+      'error' => 'That is not a usable lifetime.'
+    ]);
+  }
+
+  $created = NULL;
+
+  $result = shareStore($config, function($shares) use ($path, $lifetime, &$created)
+  {
+    $created = [
+      'token' => bin2hex(random_bytes(SHARE_TOKEN_BYTES)),
+      'path' => $path,
+      'created' => time(),
+      'expires' => $lifetime > 0 ? (time() + $lifetime) : 0
+    ];
+
+    $shares[] = $created;
+
+    return $shares;
+  });
+
+  if($result === NULL || $created === NULL)
+  {
+    uploadRespond(500, [
+      'ok' => false,
+      'error' => 'The share store could not be written.'
+    ]);
+  }
+
+  uploadRespond(201, [
+    'ok' => true,
+    'share' => shareVisible([$created], $prepend)[0],
+    'shares' => shareVisible($result, $prepend)
+  ]);
+}
+
+/**
+ * Stored shares in the shape the page and its script read them
+ *
+ * The link itself is assembled by the client from its own origin, so the
+ * document never has to trust the `Host` header to describe itself.
+ *
+ * @param Array  $shares  Stored shares
+ *
+ * @return Array
+ */
+function shareVisible($shares, $prepend = '')
+{
+  $visible = [];
+
+  foreach($shares as $share)
+  {
+    if(!isset($share['token'], $share['path']))
+    {
+      continue;
+    }
+
+    $visible[] = [
+      'token' => (string) $share['token'],
+      'path' => shareNormalizePath((string) $share['path']),
+      /**
+       * The path a recipient uses, which is the one the link and the cookie
+       * are built from: prepended where the script sits behind a proxy mount,
+       * and encoded, so a folder whose name has a space in it still works
+       */
+      'url' => sharePublicPath((string) $share['path'], $prepend),
+      'created' => isset($share['created']) ? (int) $share['created'] : 0,
+      'expires' => isset($share['expires']) && $share['expires']
+        ? (int) $share['expires']
+        : 0
+    ];
+  }
+
+  return $visible;
+}
+
+/**
+ * The notice a share viewer is shown in place of the sign-out line
+ *
+ * Rendered beside the path rather than in the footer, which can be switched
+ * off: someone following a link should always be able to see that what they
+ * are looking at is one directory of a larger index, and read-only.
+ *
+ * @param Array  $share  The accepted share
+ *
+ * @return String
+ */
+function constructShareNotice($share)
+{
+  if($share === NULL)
+  {
+    return '';
+  }
+
+  return Helpers::createElement('div', [
+    'class' => 'shareInfo'
+  ], sprintf(
+    '%sShared folder%s',
+    Helpers::icon('link'),
+    Helpers::createElement('span', [], sprintf(
+      'read-only%s', isset($share['expires']) && $share['expires']
+        ? sprintf(', until %s', gmdate('M j Y', (int) $share['expires']))
+        : ''
+    ))
+  ), true);
 }
 
 /**
@@ -2668,6 +3801,45 @@ if(file_exists(CONFIG_FILE))
 }
 
 /**
+ * Get `INDEXER_PREPEND_PATH` if set
+ *
+ * Resolved here, before authentication, because a share link and its cookie
+ * have to describe the public route the same way the listing's own links do.
+ * That is ahead of the defaults merge, so the config is read defensively: a
+ * file that leaves `trust_prepend_header` out has not set it
+ */
+if(isset($_SERVER['INDEXER_PREPEND_PATH']))
+{
+  $prependPath = $_SERVER['INDEXER_PREPEND_PATH'];
+} else if(!empty($config['trust_prepend_header'])
+  && isset($_SERVER['HTTP_X_INDEXER_PREPEND_PATH']))
+{
+  /**
+   * Only read from the request header when the operator has opted in. Any
+   * client can send this header, and it rewrites every link on the page, so
+   * honouring it unconditionally hands link control to the visitor
+   */
+  $prependPath = $_SERVER['HTTP_X_INDEXER_PREPEND_PATH'];
+} else {
+  $prependPath = '';
+}
+
+/**
+ * Constrain the prepend value to something path shaped regardless of where it
+ * came from, so a malformed proxy configuration cannot feed arbitrary text
+ * into the generated markup
+ */
+if($prependPath !== '' && !preg_match('#^[A-Za-z0-9._~!$&\'()*+,;=:@/%-]*$#', $prependPath))
+{
+  error_log(sprintf(
+    'IVFi: discarding prepend path containing unexpected characters: %s',
+    $prependPath
+  ));
+
+  $prependPath = '';
+}
+
+/**
  * Whether this request carries a session `authenticate()` accepted.
  *
  * Set from the calls below rather than read back off `$_SESSION`, because the
@@ -2676,6 +3848,15 @@ if(file_exists(CONFIG_FILE))
  * index with no `authentication` configured would then read it as a sign-in
  */
 $authenticated = false;
+
+/**
+ * The read-only share this request is being served under, if any.
+ *
+ * A share is an alternative to the password, never an addition to it: it is
+ * accepted without starting a session, so `$authenticated` stays false and
+ * every write in the script, which follows that flag, stays closed
+ */
+$share = NULL;
 
 /**
  * Call authentication function
@@ -2701,27 +3882,51 @@ if(isset($config['authentication'])
     /* Restrict content if `restrict` filter matches successfully or it is unset */
     if($isRestricted)
     {
-      /* Returns only on an accepted session, and ends the request otherwise */
+      /**
+       * A share link stands in for the password on the directory it covers,
+       * but never over a session: a signed-in client that also happens to
+       * hold a share cookie, having followed its own link, is served as
+       * itself and keeps the writes that go with that.
+       *
+       * Looked at before the password otherwise, so following a link does
+       * not land on a login form, and never for the root, which cannot be
+       * shared
+       */
+      $share = authHasSession($config['authentication']['users'], $config['authentication'])
+        ? NULL
+        : shareAccepted($config, $config['authentication'], $prependPath);
+
+      if($share === NULL)
+      {
+        /* Returns only on an accepted session, and ends the request otherwise */
+        authenticate(
+          $config['authentication']['users'],
+          'Restricted content.',
+          $config['authentication']
+        );
+
+        $authenticated = true;
+      }
+    }
+  } else {
+    /* Don't use any potential `users` array to authenticate, use main array instead */
+    $share = authHasSession($config['authentication'], $config['authentication'])
+      ? NULL
+      : shareAccepted($config, $config['authentication'], $prependPath);
+
+    if($share === NULL)
+    {
+      /**
+       * The flat form is the credential map itself, so it carries no options.
+       * Passing it as both means a stray option key is caught by the credential
+       * check below and named, instead of being read as a username
+       */
       authenticate(
-        $config['authentication']['users'],
-        'Restricted content.',
-        $config['authentication']
+        $config['authentication'], 'Restricted content.', $config['authentication']
       );
 
       $authenticated = true;
     }
-  } else {
-    /* Don't use any potential `users` array to authenticate, use main array instead */
-    /**
-     * The flat form is the credential map itself, so it carries no options.
-     * Passing it as both means a stray option key is caught by the credential
-     * check below and named, instead of being read as a username
-     */
-    authenticate(
-      $config['authentication'], 'Restricted content.', $config['authentication']
-    );
-
-    $authenticated = true;
   }
 }
 
@@ -2848,6 +4053,8 @@ class Indexer extends Helpers
 
   private $allowDirectAccess;
 
+  private $shareRoot;
+
   private $encodeAll;
 
   private $processor;
@@ -2905,6 +4112,16 @@ class Indexer extends Helpers
     $this->allowDirectAccess = isset($options['allow_direct_access'])
       ? $options['allow_direct_access']
       : true;
+
+    /**
+     * The directory a share link covers, when the request is being served
+     * under one. Everything above it is out of reach, so the page should not
+     * offer to go there: the parent row and the leading part of the path are
+     * answered against this
+     */
+    $this->shareRoot = isset($options['share_root']) && is_string($options['share_root'])
+      ? $options['share_root']
+      : NULL;
 
     /* Is requested path a directory? */
     if(is_dir($this->path))
@@ -3313,8 +4530,14 @@ class Indexer extends Helpers
       }
     }
 
-    /** Construct HTML */
-    $HTML = parent::createElement('tr', [
+    /**
+     * Construct HTML
+     *
+     * The parent row is left off at the top of a share, where the directory
+     * above it is not the viewer's to open: offering a link that answers with
+     * a password form reads as something having gone wrong
+     */
+    $HTML = $this->isShareRoot($directory) ? '' : parent::createElement('tr', [
       'class' => 'parent'
     ], implode('', array_merge([
       parent::createElement('td', [], parent::createElement('a', [
@@ -3641,9 +4864,18 @@ class Indexer extends Helpers
    */ 
   public function makePathClickable($path)
   {
-    $output = parent::createElement('a', [
-      'href' => '/'
-    ], '/');
+    /**
+     * Under a share, the leading part of the path is shown but not linked.
+     * It is the address of the directory being viewed, which is worth seeing,
+     * and it is also a set of directories the viewer was not given
+     */
+    $reachable = $this->shareRoot === NULL
+      ? '/'
+      : $this->handlePathing($this->shareRoot, true);
+
+    $output = $reachable === '/'
+      ? parent::createElement('a', ['href' => '/'], '/')
+      : parent::createElement('span', [], '/');
 
 	  $path = $this->handlePathing($path, true);
 
@@ -3658,17 +4890,36 @@ class Indexer extends Helpers
         continue;
       }
 
-      $output .= Helpers::createElement('a', [
-        'href' => sprintf('/%s', implode(
-          '/', array_slice($items, 0, $i)
-        ))
-      ], ($i === (count($items) - 1))
+      $href = sprintf('/%s', implode('/', array_slice($items, 0, $i)));
+
+      $label = ($i === (count($items) - 1))
         ? rtrim($text, '/') . '/'
-        : $text
-      );
+        : $text;
+
+      /* Anything short of the shared directory is not somewhere it can go */
+      $output .= Helpers::startsWith(rtrim($href, '/') . '/', $reachable)
+        ? Helpers::createElement('a', ['href' => $href], $label)
+        : Helpers::createElement('span', [], $label);
     }
 
     return $output;
+  }
+
+  /**
+   * Whether a directory is the top of the share this request is served under
+   *
+   * @param String  $directory  A directory, as `getCurrentDirectory()` gives it
+   *
+   * @return Boolean
+   */
+  private function isShareRoot($directory)
+  {
+    if($this->shareRoot === NULL)
+    {
+      return false;
+    }
+
+    return (rtrim($directory, '/') . '/') === (rtrim($this->shareRoot, '/') . '/');
   }
 
   /**
@@ -4167,38 +5418,6 @@ if($cookies['sorting']['ascending'] !== NULL
   $sorting['enabled'] = true;
 }
 
-/* Get `INDEXER_PREPEND_PATH` if set */
-if(isset($_SERVER['INDEXER_PREPEND_PATH']))
-{
-  $prependPath = $_SERVER['INDEXER_PREPEND_PATH'];
-} else if($config['trust_prepend_header']
-  && isset($_SERVER['HTTP_X_INDEXER_PREPEND_PATH']))
-{
-  /**
-   * Only read from the request header when the operator has opted in. Any
-   * client can send this header, and it rewrites every link on the page, so
-   * honouring it unconditionally hands link control to the visitor
-   */
-  $prependPath = $_SERVER['HTTP_X_INDEXER_PREPEND_PATH'];
-} else {
-  $prependPath = '';
-}
-
-/**
- * Constrain the prepend value to something path shaped regardless of where it
- * came from, so a malformed proxy configuration cannot feed arbitrary text
- * into the generated markup
- */
-if($prependPath !== '' && !preg_match('#^[A-Za-z0-9._~!$&\'()*+,;=:@/%-]*$#', $prependPath))
-{
-  error_log(sprintf(
-    'IVFi: discarding prepend path containing unexpected characters: %s',
-    $prependPath
-  ));
-
-  $prependPath = '';
-}
-
 try
 {
   /* Call class with options set */
@@ -4226,7 +5445,10 @@ try
           'processor' => $config['processor'],
           'encode_all' => $config['encode_all'],
           'debug' => $config['debug'],
-          'allow_direct_access' => $config['allow_direct_access']
+          'allow_direct_access' => $config['allow_direct_access'],
+          'share_root' => $share !== NULL
+            ? shareNormalizePath((string) $share['path'])
+            : NULL
       ]
   );
 } catch (Exception $e) {
@@ -4294,6 +5516,35 @@ try
   );
 }
 
+/**
+ * Now that the directory is resolved, check the share against the directory
+ * itself rather than against the request path that asked for it.
+ *
+ * The gate earlier could only compare strings, and a string is not the
+ * directory: a second round of decoding, a `#` in a name, or a symbolic link
+ * all make the two part company. A share that does not cover what was
+ * resolved is no share, so the request goes to the password instead
+ */
+if($share !== NULL && !shareCoversResolved($share, $indexer))
+{
+  error_log(sprintf(
+    'IVFi: a share of %s did not cover the resolved directory for %s',
+    $share['path'], CURRENT_URI
+  ));
+
+  $share = NULL;
+
+  /* Renders the sign-in page and ends the request, since there is no session */
+  authenticate(
+    isset($config['authentication']['users'])
+      && is_array($config['authentication']['users'])
+        ? $config['authentication']['users']
+        : $config['authentication'],
+    'Restricted content.',
+    $config['authentication']
+  );
+}
+
 /** Whether this request is allowed to write into the directory it is viewing */
 $uploadAvailable = uploadIsAvailable($config, $authenticated);
 
@@ -4309,12 +5560,21 @@ handleUpload($indexer, $config, $uploadAvailable);
 handleDirectory($indexer, $config, $uploadAvailable);
 handleDelete($indexer, $config, $uploadAvailable);
 
+/** Whether this request may mint and revoke share links */
+$shareManageable = shareIsManageable($config, $authenticated);
+
+/**
+ * Minting takes the directory from the Indexer for the same reason an upload
+ * does, so a link cannot be made for a path a listing could not show
+ */
+handleShare($indexer, $config, $shareManageable, $prependPath);
+
 /**
  * The page carries the form token so that an upload can prove it came from
  * here. It is the same value the login form renders on the same page, so this
  * exposes nothing the document did not already hold
  */
-if($uploadAvailable && empty($_SESSION['csrf']))
+if(($uploadAvailable || $shareManageable) && empty($_SESSION['csrf']))
 {
   $_SESSION['csrf'] = bin2hex(random_bytes(32));
 }
@@ -4675,10 +5935,11 @@ function generateCountDiv($modified, $count, $sString, $pString)
  * @param String    $bust        Cache-busting string
  * @param Array     $theme       An array containg a pool and a selected theme
  * @param Boolean   $upload      Whether this request may upload
- * 
+ * @param Array     $share       Share state for this request
+ *
  * @return String
- */ 
-function constructJsConfig($config, $sorting, $timestamp, $bust, $theme, $upload)
+ */
+function constructJsConfig($config, $sorting, $timestamp, $bust, $theme, $upload, $share)
 {
   /**
    * [Extract themes and options values]
@@ -4768,6 +6029,29 @@ function constructJsConfig($config, $sorting, $timestamp, $bust, $theme, $upload
     ] : [
       'enabled' => false
     ],
+    /**
+     * Same reasoning as `upload` above: a client that cannot mint a link is
+     * handed no token, no field names and no list of what is already shared
+     */
+    'share' => $share['manageable'] ? [
+      'enabled' => true,
+      'token' => isset($_SESSION['csrf']) ? $_SESSION['csrf'] : '',
+      'param' => SHARE_PARAM,
+      'createAction' => SHARE_ACTION_CREATE,
+      'revokeAction' => SHARE_ACTION_REVOKE,
+      'fields' => [
+        'action' => SHARE_FIELD_ACTION,
+        'share' => SHARE_FIELD_TOKEN,
+        'expiry' => SHARE_FIELD_EXPIRY,
+        'token' => AUTH_FIELD_CSRF
+      ],
+      /* The root cannot be shared, so the control is not offered there */
+      'shareable' => $share['shareable'],
+      'expiry' => $share['expiry'],
+      'shares' => $share['shares']
+    ] : [
+      'enabled' => false
+    ],
     'style' => [
       'themes' => [
         'path' => $config['style']['themes']['path'],
@@ -4854,7 +6138,16 @@ $jsConfig = constructJsConfig(
   $config, $sorting, $indexer->timestamp, $bust, [
     'pool' => $themes,
     'current' => $currentTheme
-  ], $uploadAvailable
+  ], $uploadAvailable, [
+    'manageable' => $shareManageable,
+    'shareable' => $indexer->getCurrentDirectory() !== '/',
+    'expiry' => $shareManageable
+      ? shareRequestedLifetime($config, NULL)
+      : 0,
+    'shares' => $shareManageable
+      ? shareVisible(shareStore($config), $prependPath)
+      : []
+  ]
 );
 ?>
 <!DOCTYPE HTML>
@@ -4879,6 +6172,7 @@ $jsConfig = constructJsConfig(
     </div>
 
     <div class="path">Index of <?=$indexer->makePathClickable($indexer->getCurrentDirectory());?></div>
+<?=constructShareNotice($share);?>
     <%= buildInject.readmeSupport &&
       buildInject.readmeSupport.DISPLAY_SNIPPET ?
       buildInject.readmeSupport.DISPLAY_SNIPPET : null %>

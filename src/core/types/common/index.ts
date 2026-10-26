@@ -82,4 +82,4 @@ export type TIconName = 'menu' | 'folder' | 'folder-plus' | 'file' | 'file-image
 	| 'file-video' | 'corner-left-up' | 'download' | 'trash-2' | 'x'
 	| 'chevron-left' | 'chevron-right' | 'chevron-up' | 'chevron-down' | 'search'
 	| 'upload' | 'panel-right' | 'copy' | 'images' | 'sliders-horizontal'
-	| 'log-out' | 'arrow-up' | 'arrow-down' | 'loader-circle';
+	| 'log-out' | 'arrow-up' | 'arrow-down' | 'loader-circle' | 'link';

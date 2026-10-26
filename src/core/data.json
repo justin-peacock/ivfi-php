@@ -35,6 +35,9 @@
 		},
 		"directory" : {
 			"text" : "New folder"
+		},
+		"share" : {
+			"text" : "Share a folder"
 		}
 	},
 	"reverseSearch" : {
