@@ -291,14 +291,6 @@
         @apply ml-3;
       }
     }
-
-    > div.referenceGit {
-      @apply ml-auto italic mobile:ml-0;
-
-      > span {
-        @apply ml-1.5;
-      }
-    }
   }
 
   body.compact > div.bottom > div:nth-child(2) > span {

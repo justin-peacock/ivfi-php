@@ -233,13 +233,6 @@ $config = [
       'show_server_name' => true
     ],
     /**
-     * Displays a simple link to the git repository in the
-     * footer along with the current version.
-     * 
-     * I would really appreciate it if you would keep this enabled
-     */
-    'credits' => true,
-    /**
      * Enables console output in JS and PHP debugging.
      * Also enables random query-strings for js/css files to bust the cache.
      *
@@ -4623,11 +4616,10 @@ function constructSessionNotice()
  * @param Float     $renderTime       Render time
  * @param String    $currentDirectory Current directory
  * @param Array     $config           Configuration values
- * @param String    $version          Current version
  * 
  * @return String
  */ 
-function constructFooter($renderTime, $currentDirectory, $config, $version)
+function constructFooter($renderTime, $currentDirectory, $config)
 {
   $footerHtml = [
     Helpers::createElement('div', [
@@ -4642,19 +4634,6 @@ function constructFooter($renderTime, $currentDirectory, $config, $version)
       'span', [], $currentDirectory
     ), constructServerNameNotice()
   ), true);
-
-  if($config['credits'] !== false)
-  {
-    $footerHtml[] = Helpers::createElement('div', [
-      'class' => 'referenceGit'
-    ], implode('',  [
-      Helpers::createElement('a', [
-        'target' => '_blank',
-        'href' => 'https://git.five.sh/ivfi/'
-      ], 'IVFi'),
-      Helpers::createElement('span', [], $version)
-    ]), true);
-  }
 
   $footerHtml[] = constructSessionNotice();
 
@@ -4936,7 +4915,7 @@ $jsConfig = constructJsConfig(
     </div>
 
     <?=$config['footer']['enabled'] ? (constructFooter(
-      (microtime(true) - $render), $indexer->getCurrentDirectory(), $config, $version)
+      (microtime(true) - $render), $indexer->getCurrentDirectory(), $config)
     ) : '';?>
 
     <div class="filterContainer" style="display: none;">
