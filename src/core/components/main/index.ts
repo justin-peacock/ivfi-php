@@ -90,6 +90,19 @@ main.menu.create = () =>
 	}
 
 	/**
+	 * Minting a link hands out access, so it is only offered to a client the
+	 * server has already told it may: a share cannot mint another
+	 */
+	if(data.components.share && data.components.share.available())
+	{
+		items.push({
+			text: data.text.menuLabels.share.text,
+			id: 'share',
+			icon: 'link'
+		});
+	}
+
+	/**
 	 * Creating a directory follows the same gate as uploading, because it is
 	 * the same thing: writing into the directory being listed
 	 */
@@ -193,6 +206,10 @@ main.menu.create = () =>
 			} else if(eventTarget.id == 'settings')
 			{
 				toggle(false, () => data.components.settings.show());
+
+			} else if(eventTarget.id == 'share')
+			{
+				toggle(false, () => data.components.share.show());
 
 			} else if(eventTarget.id == 'filter')
 			{

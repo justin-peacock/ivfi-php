@@ -16,6 +16,7 @@ import {
 	componentFilter,
 	componentBind,
 	componentMain,
+	componentShare,
 	componentUpload
 } from './components';
 
@@ -570,6 +571,7 @@ if(config.get('singlePage'))
 /* Assign components */
 data.components.settings = new componentSettings();
 data.components.upload = new componentUpload();
+data.components.share = new componentShare();
 data.components.gallery = new componentGallery();
 data.components.bind = new componentBind();
 data.components.filter = componentFilter;

@@ -1,0 +1,124 @@
+/**
+ * Read-only share links: the panel that mints and revokes them, and the
+ * notice shown to someone who followed one.
+ *
+ * The panel borrows the settings dialog's shape (overlay, popover, footer),
+ * since it is the same kind of thing and the overlay is literally the same
+ * element.
+ */
+
+@layer components {
+  /* The line under the path, for a viewer who arrived through a link */
+  body > div.shareInfo {
+    @apply mx-4 mb-3 flex items-center gap-1.5 text-sm text-muted-foreground mobile:mx-2;
+
+    > svg.icon {
+      @apply size-4 shrink-0;
+    }
+
+    > span {
+      @apply before:mr-1.5 before:content-['·'];
+    }
+  }
+
+  body > div.shareContainer {
+    @apply fixed top-1/2 left-1/2 z-50 grid w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-4 rounded-xl bg-popover p-4 text-sm text-popover-foreground shadow-lg ring-1 ring-foreground/10 sm:max-w-md;
+
+    > .wrapper {
+      @apply grid max-h-[70vh] gap-4 overflow-y-auto;
+
+      > div.title {
+        @apply text-base leading-none font-medium;
+      }
+
+      p.note {
+        @apply m-0 text-sm text-muted-foreground;
+      }
+    }
+
+    /* Minting a link */
+    > .wrapper > div.shareCreate {
+      @apply grid gap-3;
+
+      > div.row {
+        @apply flex items-center gap-2;
+
+        > label {
+          @apply shrink-0 text-sm text-muted-foreground select-none;
+        }
+
+        > select {
+          @apply h-8 min-w-0 flex-1 cursor-pointer appearance-none rounded-lg border border-input bg-transparent py-1 pr-8 pl-2.5 text-sm text-foreground transition-colors outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input/30;
+
+          background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="%2371717b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>');
+          background-position: right 0.5rem center;
+          background-repeat: no-repeat;
+          background-size: 1rem;
+
+          > option {
+            @apply bg-popover text-popover-foreground;
+          }
+        }
+
+        > div.create {
+          @apply inline-flex h-8 shrink-0 cursor-pointer items-center justify-center rounded-lg bg-primary px-2.5 text-sm font-medium whitespace-nowrap text-primary-foreground transition-colors select-none hover:bg-primary/80;
+        }
+      }
+    }
+
+    /* The live links */
+    > .wrapper > div.shareList {
+      @apply grid gap-2;
+
+      > div.shareRow {
+        @apply flex items-center gap-3 rounded-lg border border-border px-3 py-2 dark:border-input;
+
+        /* The directory being viewed, which is what the panel was opened for */
+        &.here {
+          @apply border-primary/40 bg-primary/5;
+        }
+
+        > div.details {
+          @apply min-w-0 flex-1;
+
+          > div.path {
+            @apply truncate text-sm text-foreground;
+          }
+
+          > div.meta {
+            @apply truncate text-xs text-muted-foreground;
+          }
+        }
+
+        > div.actions {
+          @apply flex shrink-0 items-center gap-1;
+
+          > div {
+            @apply inline-flex size-8 cursor-pointer items-center justify-center rounded-lg border border-transparent text-muted-foreground transition-colors select-none hover:bg-muted hover:text-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50;
+
+            > svg.icon {
+              @apply size-4;
+            }
+
+            &.revoke {
+              @apply hover:bg-destructive/10 hover:text-destructive;
+            }
+
+            /* Held briefly after a copy, so the click is visibly acknowledged */
+            &[copied] {
+              @apply bg-primary/10 text-primary;
+            }
+          }
+        }
+      }
+    }
+
+    > div.bottom {
+      @apply -mx-4 -mb-4 flex flex-row-reverse justify-start gap-2 rounded-b-xl border-t bg-muted/50 p-4;
+
+      > div.cancel {
+        @apply inline-flex h-8 cursor-pointer items-center justify-center rounded-lg border border-border bg-background px-2.5 text-sm font-medium whitespace-nowrap transition-colors select-none hover:bg-muted dark:border-input dark:bg-input/30 dark:hover:bg-input/50;
+      }
+    }
+  }
+}
